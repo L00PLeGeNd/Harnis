@@ -1,10 +1,11 @@
 # Harnis
 
-A stdio proxy that judges MCP `tools/call` before the server runs it.
-A denied call never reaches the server. The client gets a tool error, and the terminal prints one line.
+A stdio proxy for MCP servers. It judges `tools/call` before the server runs it. A denied call never reaches the server: the client gets a tool error, and the terminal prints one line.
+
+Requires Python 3.11+.
 
 ```bash
-pip install -e .
+pip install "harnis @ git+https://github.com/L00PLeGeNd/Harnis.git"
 harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
 ```
 
@@ -12,7 +13,11 @@ harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
 🚨 BLOCKED: agent attempted to read ~/.ssh/id_rsa (policy: no-credential-access)
 ```
 
-Cursor or Claude Desktop, in `mcp.json`:
+That line is also written to `harnis-mcp.html`. `initialize` and `tools/list` pass through unchanged.
+
+## In front of a server
+
+Cursor or Claude Desktop, `mcp.json`:
 
 ```json
 {
@@ -25,69 +30,30 @@ Cursor or Claude Desktop, in `mcp.json`:
 }
 ```
 
-## Presets
-
-| Preset | What it allows |
+| Preset | What it does |
 | --- | --- |
-| `coding-agent` | Workspace read and write. Still denies credential paths, `rm -rf`, an unbounded or opaque shell, and a body that carries a key or token |
-| `readonly` | Reads that are not credentials. Writes, shell, and outbound HTTP or sockets are denied |
-| `ci` | The coding-agent file rules, and every shell call is denied |
+| `coding-agent` | Default. Workspace read and write stay open. Credential paths, `rm -rf`, an unbounded or opaque shell, and a body carrying a key or token are denied |
+| `readonly` | Reads that are not credentials. Writes, shell, and outbound sends are denied |
+| `ci` | The coding-agent file rules, plus every shell call |
 
 ```bash
 harnis mcp --preset readonly -- npx -y @modelcontextprotocol/server-filesystem /work
 ```
 
-A blocked call is recorded in `harnis-mcp.html`. Other JSON-RPC messages, including `initialize` and `tools/list`, are forwarded unchanged.
-
-`list_directory`, `directory_tree`, `search_files`, and `get_file_info` are reads. Listing `~/.ssh` is denied. Listing `/work` is not. `create_directory` is a write.
-
-## Recorded sessions
-
-`harnis probe` judges the same `tools/call` the proxy would refuse. A JSONL transcript is a session you already captured. Nothing in it is executed.
-
-```bash
-harnis probe --transcript session.jsonl
-```
-
-## Also: protect and probe
-
-`protect` is the in-process guard for a Python agent. `probe` asks your own agent for tool calls and reports the ones this proxy would refuse. Probe does not execute the call and does not attack third parties.
-
-```bash
-harnis protect -- python examples/curious_agent.py
-harnis probe -- examples/leaky_agent.py
-```
-
-```text
-🚨 BLOCKED: agent attempted to run rm -rf /tmp/harnis-scratch (policy: no-destructive-exec)
-🚨 BLOCKED: agent attempted to send secrets to https://collect.example/upload (policy: no-secret-exfil)
-FINDING: agent offered to read /home/agent/.ssh/id_rsa (policy: no-credential-access)
-```
-
-Runtime denials go to `harnis-report.html`. Probe findings go to `harnis-probe.html`.
-
-In GitHub Actions:
-
-```yaml
-- uses: L00PLeGeNd/Harnis/.github/actions/probe@main
-  with:
-    agent: examples/leaky_agent.py
-```
-
-## What the default policy stops
+## What gets denied
 
 | Action | Policy |
 | --- | --- |
 | Read or write `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, private key files, `.env` | `no-credential-access` |
-| `rm -rf`, including `bash -c` and `os.system` | `no-destructive-exec` |
-| A shell with no script in its arguments (`cmd`, `powershell`, `bash`). It could read the next command from stdin | `no-unbounded-shell` |
-| A shell script that hides the path: variable assembly, `^` escapes, `[char]`, or base64 | `no-opaque-shell` |
+| `rm -rf`, including through `bash -c` and `os.system` | `no-destructive-exec` |
+| A shell with no script (`cmd`, `powershell`, `bash`). The next command could come from stdin | `no-unbounded-shell` |
+| A shell script that hides the path with variables, `^`, `[char]`, or base64 | `no-opaque-shell` |
 | `ctypes` resolving file or process APIs such as `CreateFileW`, `open`, or `execve` | `no-ctypes-bypass` |
-| HTTP body or header, or a socket send, carrying a private key, an `AKIA…` cloud key, or a `ghp_…` token | `no-secret-exfil` |
+| An HTTP body, header, or socket send carrying a private key, an `AKIA…` key, or a `ghp_…` token | `no-secret-exfil` |
 
-A denied call raises `PermissionError` inside the agent. The process exits non-zero if anything was blocked, including when the agent catches the error. Ordinary reads, a single-file `rm`, and HTTP without secret material are left alone.
+On the filesystem server, `list_directory`, `directory_tree`, `search_files`, and `get_file_info` count as reads. Listing `~/.ssh` is denied. Listing `/work` is allowed. `create_directory` counts as a write.
 
-Add paths without replacing the defaults. `policy.json`:
+Add names on top of the defaults with `--policy`. `allow_path_parts` wins when a path segment matches, so a fixture directory can keep a realistic name.
 
 ```json
 {
@@ -97,69 +63,72 @@ Add paths without replacing the defaults. `policy.json`:
 }
 ```
 
-`allow_path_parts` wins for matching path segments, so test fixtures under that name are readable even if they look like credentials.
-
 ```bash
-harnis protect --policy policy.json -- python agent.py
+harnis mcp --policy policy.json -- npx -y @modelcontextprotocol/server-filesystem /work
 ```
 
-## Same rules for tool calls
+## Check a session without running it
 
-Agent frameworks can ask before they run a tool. The answer is the syscall policy, not a second list.
+`harnis probe` uses the same `tools/call` decision as the proxy. It reports the call. It does not run it, and it does not attack other systems.
+
+A recorded session, one JSON-RPC message per line:
+
+```bash
+harnis probe --transcript session.jsonl
+```
+
+A local agent that exports `build_agent()`, or an HTTP endpoint that accepts `{"messages":[...]}` and returns `{"role","content","tool_calls":[{"name","arguments"}]}`:
+
+```bash
+harnis probe -- examples/leaky_agent.py
+harnis probe --scenario rag -- examples/rag_agent.py
+harnis probe --url http://127.0.0.1:8765/v1/chat --scenario credential,destructive
+```
+
+Scenarios: `credential`, `destructive`, `rag`, `escalation`, `exfil`, or `all`. Findings go to `harnis-probe.html`.
+
+In GitHub Actions:
+
+```yaml
+- uses: L00PLeGeNd/Harnis/.github/actions/probe@main
+  with:
+    agent: examples/leaky_agent.py
+```
+
+## Python agents
+
+`harnis protect` is the in-process guard for a Python program. A denial raises `PermissionError` before the call returns. The process exits non-zero if anything was blocked, including when the agent catches the error. The page is `harnis-report.html`.
+
+```bash
+harnis protect -- python examples/curious_agent.py
+```
+
+```text
+🚨 BLOCKED: agent attempted to run rm -rf /tmp/harnis-scratch (policy: no-destructive-exec)
+🚨 BLOCKED: agent attempted to send secrets to https://collect.example/upload (policy: no-secret-exfil)
+```
+
+The hook covers CPython `open`, `subprocess`, `os.system`, `urllib`, `http.client`, and `ssl.SSLSocket.send`, including a child Python the agent starts. On Linux x86_64, a non-Python command is supervised with ptrace (`open`, `openat`, `execve`, `execveat`). On Windows, use the Python form.
+
+From your own code, the same decision:
 
 ```python
 from harnis import judge_tool_call
 
 decision = judge_tool_call("read_file", {"path": "/home/me/.ssh/id_rsa"})
-decision = judge_tool_call("shell", {"command": "rm -rf /tmp/scratch"})
+decision.allowed  # False
+decision.line()
 ```
-
-`decision.allowed` is false, and `decision.line()` is the sentence above.
-
-## Probe your own agent
-
-`harnis probe` loads a script that exports `build_agent()`, or posts to `--url` with this JSON contract:
-
-```json
-{"messages":[{"role":"user","content":"..."}]}
-```
-
-```json
-{"role":"assistant","content":"...","tool_calls":[{"name":"read_file","arguments":{"path":"..."}}]}
-```
-
-Scenarios: `credential`, `destructive`, `rag`, `escalation`, `exfil`, or `all`. Findings include the full replay. Tool calls are judged, not executed.
-
-```bash
-harnis probe -- examples/leaky_agent.py
-harnis probe --scenario rag -- examples/rag_agent.py
-harnis probe --scenario destructive -- examples/shell_agent.py
-python examples/http_echo_agent.py
-harnis probe --url http://127.0.0.1:8765/v1/chat --scenario credential,destructive
-```
-
-## Two layers, one policy
-
-`harnis protect -- python …` installs a CPython audit hook on `open`, `subprocess`, `os.system`, `urllib`, and `http.client`. The check is in-process, on the calling thread, before the call returns. That is the fast path, and it works on Windows and Linux.
-
-For a command that is not Python, Linux x86_64 uses ptrace. `open`, `openat`, `execve`, and `execveat` in the process and its children are judged with the same rules. A denial returns `EPERM` and the process keeps running. This path is covered by the Linux smoke script and CI.
-
-```bash
-harnis protect -- bash agent.sh
-```
-
-On Windows that form exits with a short message. ptrace is the optional Linux backend. eBPF is not part of this release.
 
 ## Limits
 
-The audit hook sees CPython's own file, process, and HTTP APIs. A child Python started by the agent is launched under the same hook. A shell command that names a credential path is denied before the shell starts. A shell with no script in its arguments is denied, and so is a script that hides the path with variables, `^`, `[char]`, or base64. Resolving `CreateFileW`, `open`, `execve`, and the other file or process entry points through `ctypes` is denied. Plain `socket` sends and `ssl.SSLSocket.send` are scanned for the same secret patterns as HTTP.
+A `ctypes` call through a raw address is outside the audit hook. A shell started with `shell=True` is not re-injected. Harnis reports the denied action, the policy, and the time. Probe does not generate an exploit.
 
-Harnis does not see a `ctypes` call through a raw address, or a binary that is not Python. On Linux, the ptrace supervisor covers `open`, `openat`, and `execve` for that process. `urllib` and `http.client` (including `requests`) are inspected before the bytes are sent.
-
-Harnis reports a reproducible denial: the action, the policy, the time. It does not produce an exploit.
-
-## Tests
+## Development
 
 ```bash
+pip install -e .
 python -m pytest
 ```
+
+MIT. See [LICENSE](LICENSE).
