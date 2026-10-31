@@ -8,7 +8,7 @@ Requires Python 3.11+.
 npx -y github:L00PLeGeNd/Harnis scan
 ```
 
-With no path it reads `.cursor/mcp.json`. Pass a path to read another file. A missing file exits 0. A bare catalog server exits 1.
+With no path it reads `.cursor/mcp.json`, `.vscode/mcp.json`, and `~/.cursor/mcp.json` when those files exist. A missing file exits 0. A bare catalog server exits 1. The pasted block keeps the server's `env`.
 
 ```text
 github can call delete_file.

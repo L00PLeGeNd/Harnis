@@ -42,15 +42,36 @@ class ConfigFinding:
 
 def scan_config(path: Path | None = None) -> list[ConfigFinding]:
     """Return one finding per catalog server that is not wrapped with its preset."""
-    file = Path(".cursor/mcp.json") if path is None else Path(path)
+    files = [Path(path)] if path is not None else _default_files()
+    findings: list[ConfigFinding] = []
+    seen: set[str] = set()
+    for file in files:
+        for finding in _scan_file(file):
+            key = json.dumps(finding.snippet, sort_keys=True, ensure_ascii=False)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(finding)
+    return findings
+
+
+def _default_files() -> list[Path]:
+    candidates = [
+        Path(".cursor/mcp.json"),
+        Path(".vscode/mcp.json"),
+        Path.home() / ".cursor" / "mcp.json",
+    ]
+    return [path for path in candidates if path.is_file()]
+
+
+def _scan_file(file: Path) -> list[ConfigFinding]:
     if not file.is_file():
         return []
     data = json.loads(file.read_text(encoding="utf-8"))
-    servers = data.get("mcpServers") if isinstance(data, dict) else None
-    if not isinstance(servers, dict):
+    if not isinstance(data, dict):
         return []
     findings: list[ConfigFinding] = []
-    for name, entry in servers.items():
+    for _name, entry in _servers(data).items():
         if not isinstance(entry, dict):
             continue
         hit = _catalog_hit(_argv(entry))
@@ -60,18 +81,31 @@ def scan_config(path: Path | None = None) -> list[ConfigFinding]:
         if _wrapped(entry, preset):
             continue
         command, args = _server_argv(entry)
+        snippet = {
+            "command": "npx",
+            "args": ["-y", _LAUNCH, "mcp", "--preset", preset, "--", command, *args],
+        }
+        env = entry.get("env")
+        if isinstance(env, dict):
+            snippet["env"] = env
         findings.append(
             ConfigFinding(
-                server=str(name),
+                server=str(_name),
                 preset=preset,
                 tool=tool,
-                snippet={
-                    "command": "npx",
-                    "args": ["-y", _LAUNCH, "mcp", "--preset", preset, "--", command, *args],
-                },
+                snippet=snippet,
             )
         )
     return findings
+
+
+def _servers(data: dict) -> dict:
+    found: dict = {}
+    for key in ("mcpServers", "servers"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            found.update(value)
+    return found
 
 
 def _catalog_hit(tokens: list[str]) -> tuple[str, str] | None:
@@ -84,10 +118,25 @@ def _catalog_hit(tokens: list[str]) -> tuple[str, str] | None:
 
 
 def _token_is(token: str, package: str) -> bool:
-    name = token.replace("\\", "/").rstrip("/")
-    leaf = name.rsplit("/", 1)[-1]
     folded = package.casefold()
-    return name.casefold() == folded or leaf.casefold() == folded
+    return any(candidate.casefold() == folded for candidate in _token_names(token))
+
+
+def _token_names(token: str) -> list[str]:
+    name = _without_digest(token.replace("\\", "/").strip())
+    bare = name.split(":", 1)[0]
+    leaf = bare.rsplit("/", 1)[-1]
+    if leaf.casefold().endswith(".exe"):
+        leaf = leaf[:-4]
+    return [name, bare, leaf]
+
+
+def _without_digest(name: str) -> str:
+    marker = "@sha256:"
+    index = name.casefold().find(marker)
+    if index >= 0:
+        return name[:index]
+    return name
 
 
 def _argv(entry: dict) -> list[str]:

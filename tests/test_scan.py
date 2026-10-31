@@ -129,10 +129,79 @@ def test_missing_config_is_quiet(tmp_path: Path):
     assert scan_config(tmp_path / "missing.json") == []
 
 
+def test_official_github_image_keeps_its_env(tmp_path: Path):
+    config = tmp_path / "mcp.json"
+    _write(
+        config,
+        {
+            "github": {
+                "command": "docker",
+                "args": [
+                    "run",
+                    "-i",
+                    "--rm",
+                    "-e",
+                    "GITHUB_PERSONAL_ACCESS_TOKEN",
+                    "ghcr.io/github/github-mcp-server:latest",
+                ],
+                "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "placeholder"},
+            }
+        },
+    )
+
+    findings = scan_config(config)
+
+    assert len(findings) == 1
+    assert findings[0].preset == "github"
+    assert findings[0].snippet["args"][-1] == "ghcr.io/github/github-mcp-server:latest"
+    assert findings[0].snippet["env"] == {"GITHUB_PERSONAL_ACCESS_TOKEN": "placeholder"}
+
+
+def test_vscode_servers_key_is_seen(tmp_path: Path):
+    config = tmp_path / "mcp.json"
+    config.write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "github": {
+                        "command": "docker",
+                        "args": ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    findings = scan_config(config)
+
+    assert len(findings) == 1
+    assert findings[0].tool == "delete_file"
+
+
 def test_scan_defaults_to_the_cursor_config(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     config = tmp_path / ".cursor" / "mcp.json"
     config.parent.mkdir()
+    _write(config, {"github": {"command": "github-mcp-server", "args": ["stdio"]}})
+
+    findings = scan_config(None)
+
+    assert len(findings) == 1
+    assert findings[0].preset == "github"
+
+
+def test_scan_reads_the_global_cursor_config_when_the_project_has_none(
+    tmp_path: Path, monkeypatch
+):
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    config = home / ".cursor" / "mcp.json"
+    config.parent.mkdir(parents=True)
     _write(config, {"github": {"command": "github-mcp-server", "args": ["stdio"]}})
 
     findings = scan_config(None)
