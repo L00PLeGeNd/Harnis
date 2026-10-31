@@ -1,10 +1,12 @@
 # Harnis
 
 Runtime sandbox for AI agents. Block the dangerous action while it runs.
+Probe your own agent for tool calls that would violate the same policy.
 
 ```bash
 pip install -e .
 harnis protect -- python examples/curious_agent.py
+harnis probe -- examples/leaky_agent.py
 ```
 
 ```text
@@ -13,7 +15,11 @@ harnis protect -- python examples/curious_agent.py
 🚨 BLOCKED: agent attempted to send secrets to https://collect.example/upload (policy: no-secret-exfil)
 ```
 
-The same denials are written to `harnis-report.html`.
+```text
+FINDING: agent offered to read /home/agent/.ssh/id_rsa (policy: no-credential-access)
+```
+
+Runtime denials go to `harnis-report.html`. Probe findings go to `harnis-probe.html` with a replay of the conversation and tool calls. Probe judges proposed tool calls; it does not attack third-party systems.
 
 ## What the default policy stops
 
@@ -53,6 +59,15 @@ decision = judge_tool_call("shell", {"command": "rm -rf /tmp/scratch"})
 ```
 
 `decision.allowed` is false, and `decision.line()` is the sentence above.
+
+## Probe your own agent
+
+`harnis probe` loads a script that exports `build_agent()`. The agent must implement `respond(turns) -> Turn`. Harnis sends credential-oriented prompts, including a follow-up on multi-turn chains, and judges every proposed tool call with the runtime policy. A finding includes the full replay. The tool call is not executed.
+
+```bash
+harnis probe -- examples/leaky_agent.py
+harnis probe -- examples/safe_agent.py
+```
 
 ## Two layers, one policy
 

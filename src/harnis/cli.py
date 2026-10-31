@@ -1,4 +1,4 @@
-"""The one verb: harnis protect -- python agent.py"""
+"""Entry points: harnis protect / harnis probe."""
 
 from __future__ import annotations
 
@@ -11,14 +11,16 @@ from harnis.runtime import BOOTSTRAP, looks_like_python
 
 USAGE = """\
 harnis protect -- python agent.py
+harnis probe -- examples/leaky_agent.py
 
-Deny credential reads, rm -rf, and outbound secrets while the agent runs.
-A blocked action is printed to stderr and written to harnis-report.html.
+protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
+probe    Script prompts against your agent; report tool calls that violate policy.
 
 Options:
-  --report PATH    HTML report (default: ./harnis-report.html)
+  --report PATH    HTML report (default: harnis-report.html / harnis-probe.html)
   --policy PATH    JSON file adding deny_path_parts and deny_file_names
 """
+
 
 def main(argv: list[str] | None = None) -> None:
     raise SystemExit(run(argv))
@@ -29,12 +31,16 @@ def run(argv: list[str] | None = None) -> int:
     if not args or args[0] in {"-h", "--help"}:
         sys.stdout.write(USAGE)
         return 0
-    if args[0] != "protect":
-        sys.stderr.write(
-            "harnis: unknown command. The entry point is: harnis protect -- python agent.py\n"
-        )
-        return 2
-    return protect(args[1:])
+    command = args[0]
+    if command == "protect":
+        return protect(args[1:])
+    if command == "probe":
+        return probe_command(args[1:])
+    sys.stderr.write(
+        "harnis: unknown command. Use: harnis protect -- python agent.py\n"
+        "                         or: harnis probe -- agent.py\n"
+    )
+    return 2
 
 
 def protect(args: list[str]) -> int:
@@ -76,6 +82,45 @@ def protect(args: list[str]) -> int:
         "       On this machine run: harnis protect -- python agent.py\n"
     )
     return 2
+
+
+def probe_command(args: list[str]) -> int:
+    report = Path("harnis-probe.html")
+    policy: Path | None = None
+    rest = list(args)
+    while rest and rest[0] != "--":
+        flag = rest[0]
+        if flag in {"-h", "--help"}:
+            sys.stdout.write(USAGE)
+            return 0
+        if flag == "--report":
+            if len(rest) < 2:
+                return _error("--report needs a path")
+            report = Path(rest[1])
+            rest = rest[2:]
+            continue
+        if flag == "--policy":
+            if len(rest) < 2:
+                return _error("--policy needs a path")
+            policy = Path(rest[1])
+            rest = rest[2:]
+            continue
+        return _error(f"unknown option {flag}")
+    if not rest or rest[0] != "--" or len(rest) < 2:
+        return _error("usage: harnis probe -- agent.py")
+    agent_path = Path(rest[1])
+    if not agent_path.is_file():
+        return _error(f"agent script not found: {agent_path}")
+    from harnis.probe import probe_script
+    from harnis.report import emit_finding
+
+    try:
+        findings = probe_script(agent_path.resolve(), report.resolve(), policy)
+    except (OSError, ValueError) as exc:
+        return _error(str(exc))
+    for finding in findings:
+        emit_finding(finding)
+    return 1 if findings else 0
 
 
 def _run_python(executable: str, user_args: list[str], report: Path, policy: Path | None) -> int:

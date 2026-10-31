@@ -97,9 +97,19 @@ class Session:
 
 
 def emit(decision: Decision) -> None:
-    line = decision.line()
+    _emit_line(decision.line())
+
+
+def emit_finding(finding) -> None:
+    _emit_line(getattr(finding, "line", str(finding)))
+
+
+def _emit_line(line: str) -> None:
     if sys.stderr.isatty():
-        line = line.replace("BLOCKED", "\033[1;31mBLOCKED\033[0m", 1)
+        for token in ("BLOCKED", "FINDING"):
+            if token in line:
+                line = line.replace(token, f"\033[1;31m{token}\033[0m", 1)
+                break
     data = (line + "\n").encode("utf-8", "replace")
     buffer = getattr(sys.stderr, "buffer", None)
     if buffer is None:
@@ -118,6 +128,69 @@ def render_html(incidents: tuple[Incident, ...] | list[Incident]) -> str:
         body = _blocked_sheet(tuple(incidents))
         title = f"Harnis — {len(incidents)} blocked"
     return _page(title, body)
+
+
+def render_findings(findings: list) -> str:
+    if not findings:
+        body = """<article class="sheet">
+  <div class="brand">Harnis</div>
+  <div class="kicker">Probe</div>
+  <h1>Clear</h1>
+  <div class="rule"></div>
+  <p class="phrase">No violating tool chain was offered.</p>
+  <footer>Scripted prompts ran. The agent did not propose a blocked tool call.</footer>
+</article>"""
+        return _page("Harnis — probe clear", body)
+    lead = findings[0]
+    extras = ""
+    if len(findings) > 1:
+        extras = '<section class="more">\n' + "\n".join(
+            _finding_extra(item) for item in findings[1:]
+        ) + "\n</section>"
+    replay = _replay_html(lead.replay)
+    body = f"""<article class="sheet">
+  <div class="brand">Harnis</div>
+  <div class="kicker">Probe finding</div>
+  <h1>Finding</h1>
+  <div class="rule"></div>
+  <p class="phrase">{html.escape(lead.line)}</p>
+  <div class="policy">policy: {html.escape(lead.policy)}</div>
+  <dl>
+    <dt>Scenario</dt><dd>{html.escape(lead.scenario)}</dd>
+    <dt>Action</dt><dd>{html.escape(lead.phrase)}</dd>
+  </dl>
+  <section class="more">
+    <article>
+      <h2>Replay</h2>
+      {replay}
+    </article>
+  </section>
+  {extras}
+  <footer>Reproducible against this agent. Harnis did not execute the tool call.</footer>
+</article>"""
+    return _page(f"Harnis — {len(findings)} finding(s)", body)
+
+
+def _finding_extra(finding) -> str:
+    return (
+        "<article>"
+        f"<h2>{html.escape(finding.line)}</h2>"
+        f"<div class=\"policy\">policy: {html.escape(finding.policy)}</div>"
+        "</article>"
+    )
+
+
+def _replay_html(replay) -> str:
+    parts = []
+    for turn in replay:
+        role = html.escape(getattr(turn, "role", ""))
+        text = html.escape(getattr(turn, "text", "") or "")
+        parts.append(f"<p><strong>{role}</strong>: {text}</p>")
+        for call in getattr(turn, "tool_calls", ()) or ():
+            name = html.escape(str(call.get("name", "")))
+            arguments = html.escape(str(call.get("arguments", {})))
+            parts.append(f"<p class=\"policy\">tool {name} {arguments}</p>")
+    return "\n".join(parts)
 
 
 def _page(title: str, body: str) -> str:

@@ -4,5 +4,6 @@ __pycache__/
 dist/
 build/
 harnis-report.html
+harnis-probe.html
 *.html.tmp
 *.events.jsonl
