@@ -1,8 +1,9 @@
 """Red-team probe for your own agent.
 
-Runs short scripted conversations, judges every tool call with the same
-policy as `harnis protect`, and writes a replayable finding when a call
-would violate it. This does not attack third-party systems.
+Runs short scripted conversations, or a recorded MCP session, and judges
+every tools/call with the same decision as `harnis mcp`. A finding is a
+call the proxy would refuse. This does not attack third-party systems and
+does not execute the call.
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from harnis.policy import Rules, judge_tool_call, load_rules
+from harnis.mcp_proxy import decision_for_message
+from harnis.policy import Rules, rules_for
 from harnis.report import render_findings
 
 
@@ -206,8 +208,16 @@ def _findings_from_reply(
         arguments = call.get("arguments") or {}
         if not isinstance(arguments, dict):
             arguments = {}
-        decision = judge_tool_call(name_, arguments, rules)
-        if decision.allowed:
+        decision = decision_for_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name_, "arguments": arguments},
+            },
+            rules,
+        )
+        if decision is None or decision.allowed:
             continue
         found.append(
             Finding(
@@ -220,11 +230,69 @@ def _findings_from_reply(
     return found
 
 
+def probe_transcript(path: Path, report: Path, rules: Rules | None = None) -> list[Finding]:
+    """Judge a recorded MCP session. Blocked tools/call become findings.
+
+    The calls are not forwarded and not executed.
+    """
+    rules = rules or Rules()
+    if not path.is_file():
+        raise ValueError(f"transcript not found: {path}")
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}:{lineno} is not a JSON message") from exc
+        if not isinstance(message, dict):
+            continue
+        decision = decision_for_message(message, rules)
+        if decision is None or decision.allowed:
+            continue
+        key = (decision.policy or "", decision.phrase)
+        if key in seen:
+            continue
+        seen.add(key)
+        params = message.get("params") or {}
+        if not isinstance(params, dict):
+            params = {}
+        name = str(params.get("name") or "")
+        arguments = params.get("arguments") or {}
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                arguments = {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        findings.append(
+            Finding(
+                policy=decision.policy or "",
+                phrase=decision.phrase,
+                scenario="transcript",
+                replay=(
+                    Turn(role="user", text=f"MCP tools/call {name}"),
+                    Turn(
+                        role="assistant",
+                        text="",
+                        tool_calls=({"name": name, "arguments": arguments},),
+                    ),
+                ),
+            )
+        )
+    _write_report(report, findings)
+    return findings
+
+
 def probe_script(
     path: Path,
     report: Path,
     policy: Path | None = None,
     scenarios: tuple[str, ...] = ("credential", "destructive"),
+    preset: str = "coding-agent",
 ) -> list[Finding]:
     """Load an agent module that exposes `build_agent()` and probe it."""
     import runpy
@@ -234,7 +302,7 @@ def probe_script(
     if factory is None:
         raise ValueError(f"{path} must define build_agent()")
     agent = factory()
-    rules = load_rules(str(policy) if policy is not None else None)
+    rules = rules_for(preset, str(policy) if policy is not None else None)
     return probe(
         ProbeTarget(agent=agent, rules=rules),
         report=report,
@@ -247,8 +315,9 @@ def probe_url(
     report: Path,
     policy: Path | None = None,
     scenarios: tuple[str, ...] = ("credential", "destructive"),
+    preset: str = "coding-agent",
 ) -> list[Finding]:
-    rules = load_rules(str(policy) if policy is not None else None)
+    rules = rules_for(preset, str(policy) if policy is not None else None)
     return probe(
         ProbeTarget(agent=HttpAgent(url), rules=rules),
         report=report,

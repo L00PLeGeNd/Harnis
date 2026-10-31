@@ -39,6 +39,16 @@ harnis mcp --preset readonly -- npx -y @modelcontextprotocol/server-filesystem /
 
 A blocked call is recorded in `harnis-mcp.html`. Other JSON-RPC messages, including `initialize` and `tools/list`, are forwarded unchanged.
 
+`list_directory`, `directory_tree`, `search_files`, and `get_file_info` are reads. Listing `~/.ssh` is denied. Listing `/work` is not. `create_directory` is a write.
+
+## Recorded sessions
+
+`harnis probe` judges the same `tools/call` the proxy would refuse. A JSONL transcript is a session you already captured. Nothing in it is executed.
+
+```bash
+harnis probe --transcript session.jsonl
+```
+
 ## Also: protect and probe
 
 `protect` is the in-process guard for a Python agent. `probe` asks your own agent for tool calls and reports the ones this proxy would refuse. Probe does not execute the call and does not attack third parties.

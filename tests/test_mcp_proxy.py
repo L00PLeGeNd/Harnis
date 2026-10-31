@@ -103,6 +103,44 @@ def test_ci_preset_blocks_a_shell_that_coding_agent_allows():
     assert handle_client_message(message, rules_for("coding-agent")) is None
 
 
+def test_filesystem_server_cannot_list_a_credential_directory():
+    from harnis.mcp_proxy import handle_client_message
+    from harnis.policy import Rules
+
+    listing = {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {
+            "name": "list_directory",
+            "arguments": {"path": "/home/agent/.ssh"},
+        },
+    }
+    workspace = {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "tools/call",
+        "params": {"name": "list_directory", "arguments": {"path": "/work"}},
+    }
+    info = {
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "tools/call",
+        "params": {
+            "name": "get_file_info",
+            "arguments": {"path": "/home/agent/.ssh/id_rsa"},
+        },
+    }
+
+    blocked = handle_client_message(listing, Rules())
+    assert blocked is not None
+    assert "no-credential-access" in blocked["result"]["content"][0]["text"]
+    assert handle_client_message(workspace, Rules()) is None
+    info_blocked = handle_client_message(info, Rules())
+    assert info_blocked is not None
+    assert "no-credential-access" in info_blocked["result"]["content"][0]["text"]
+
+
 def test_coding_agent_preset_allows_a_normal_write():
     from harnis.mcp_proxy import handle_client_message
     from harnis.policy import rules_for

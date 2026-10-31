@@ -240,7 +240,7 @@ def credential_path(path: str, rules: Rules | None = None) -> bool:
     name = folded[-1]
     if any(part in _CREDENTIAL_DIRS or part in rules.deny_path_parts for part in dirs):
         return True
-    if name in rules.deny_path_parts or name in rules.deny_file_names:
+    if name in _CREDENTIAL_DIRS or name in rules.deny_path_parts or name in rules.deny_file_names:
         return True
     if name in _CREDENTIAL_FILES:
         return True
@@ -502,10 +502,16 @@ _FILE_READS = frozenset({
     "open_file",
     "cat",
     "fetch_file",
+    "list_directory",
+    "list_directory_with_sizes",
+    "directory_tree",
+    "search_files",
+    "get_file_info",
 })
 _FILE_WRITES = frozenset({
     "write_file",
     "edit_file",
+    "create_directory",
     "write",
     "save_file",
 })
