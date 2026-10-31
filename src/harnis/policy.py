@@ -1,0 +1,499 @@
+"""Decides whether one agent action is allowed.
+
+The hot path is pure: no I/O, no locks, no policy reloads. Callers in an
+audit hook or a ptrace stop should be able to judge and return.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shlex
+from dataclasses import dataclass
+from pathlib import Path
+
+_CREDENTIAL_DIRS = frozenset({
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+})
+_CREDENTIAL_FILES = frozenset({
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "credentials",
+    "credentials.json",
+    "secrets.json",
+    ".netrc",
+    ".pgpass",
+    ".npmrc",
+    ".pypirc",
+})
+_SHELLS = frozenset({
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "pwsh.exe",
+})
+_READERS = frozenset({
+    "type",
+    "more",
+    "cat",
+    "head",
+    "tail",
+    "less",
+    "copy",
+    "xcopy",
+    "robocopy",
+    "get-content",
+    "gc",
+    "curl",
+    "wget",
+    "iwr",
+    "invoke-webrequest",
+    "invoke-restmethod",
+})
+_EXPANSION = re.compile(r"%[^%\s]{1,64}%|\$env:|\$\{|\$[A-Za-z_]", re.IGNORECASE)
+_OBFUSCATION = re.compile(
+    r"\[char\]|frombase64string|invoke-expression|\biex\b",
+    re.IGNORECASE,
+)
+_SECRET_MARKERS = (
+    b"-----BEGIN OPENSSH PRIVATE KEY-----",
+    b"-----BEGIN PRIVATE KEY-----",
+    b"-----BEGIN RSA PRIVATE KEY-----",
+    b"-----BEGIN EC PRIVATE KEY-----",
+)
+_RAW_SYMBOLS = frozenset({
+    "open",
+    "open64",
+    "fopen",
+    "freopen",
+    "openat",
+    "_open",
+    "_wopen",
+    "createfilea",
+    "createfilew",
+    "createfile2",
+    "ntcreatefile",
+    "zwcreatefile",
+    "deletefilea",
+    "deletefilew",
+    "system",
+    "_wsystem",
+    "popen",
+    "_popen",
+    "execve",
+    "execv",
+    "execvp",
+    "fexecve",
+    "createprocessa",
+    "createprocessw",
+    "winexec",
+    "shellexecutea",
+    "shellexecutew",
+    "shellexecuteexw",
+})
+
+
+@dataclass(frozen=True)
+class Action:
+    kind: str
+    path: str = ""
+    command: tuple[str, ...] = ()
+    url: str = ""
+    body: bytes = b""
+    headers: tuple[tuple[str, str], ...] = ()
+    symbol: str = ""
+
+
+@dataclass(frozen=True)
+class Decision:
+    allowed: bool
+    policy: str | None
+    phrase: str
+
+    def line(self) -> str:
+        return (
+            f"🚨 BLOCKED: agent attempted to {self.phrase} "
+            f"(policy: {self.policy})"
+        )
+
+
+@dataclass(frozen=True)
+class Rules:
+    """Optional additions on top of the built-in default policy."""
+
+    deny_path_parts: frozenset[str] = frozenset()
+    deny_file_names: frozenset[str] = frozenset()
+
+
+def load_rules(path: str | None) -> Rules:
+    if not path:
+        return Rules()
+    file = Path(path)
+    try:
+        data = json.loads(file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"policy file is not valid JSON: {file}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"policy file must be a JSON object: {file}")
+    return Rules(
+        deny_path_parts=_string_set(data.get("deny_path_parts", []), "deny_path_parts"),
+        deny_file_names=_string_set(data.get("deny_file_names", []), "deny_file_names"),
+    )
+
+
+def _string_set(value, field: str) -> frozenset[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be a list of strings")
+    return frozenset(item.casefold() for item in value if item)
+
+
+def judge(action: Action, rules: Rules | None = None) -> Decision:
+    rules = rules or Rules()
+    if action.kind in {"file_read", "file_write"}:
+        return _judge_path(action, rules)
+    if action.kind == "exec":
+        return _judge_exec(action, rules)
+    if action.kind == "http":
+        return _judge_http(action)
+    if action.kind == "ctypes":
+        return _judge_ctypes(action)
+    if action.kind == "socket":
+        return _judge_socket(action)
+    return Decision(True, None, action.kind)
+
+
+def _judge_socket(action: Action) -> Decision:
+    if carries_secret(action.body, action.headers):
+        return Decision(False, "no-secret-exfil", "send secrets over a socket")
+    return Decision(True, None, "send over a socket")
+
+
+def _judge_ctypes(action: Action) -> Decision:
+    symbol = action.symbol or "(unknown)"
+    phrase = f"resolve {symbol}"
+    if action.symbol.casefold() in _RAW_SYMBOLS:
+        return Decision(False, "no-ctypes-bypass", phrase)
+    return Decision(True, None, phrase)
+
+
+def _judge_path(action: Action, rules: Rules) -> Decision:
+    verb = "write" if action.kind == "file_write" else "read"
+    phrase = f"{verb} {display_path(action.path)}"
+    if credential_path(action.path, rules):
+        return Decision(False, "no-credential-access", phrase)
+    return Decision(True, None, phrase)
+
+
+def credential_path(path: str, rules: Rules | None = None) -> bool:
+    rules = rules or Rules()
+    parts = _parts(path)
+    if not parts:
+        return False
+    folded = [part.casefold() for part in parts]
+    dirs = folded[:-1]
+    name = folded[-1]
+    if any(part in _CREDENTIAL_DIRS or part in rules.deny_path_parts for part in dirs):
+        return True
+    if name in rules.deny_path_parts or name in rules.deny_file_names:
+        return True
+    if name in _CREDENTIAL_FILES:
+        return True
+    if name == ".env" or name.startswith(".env."):
+        return True
+    return False
+
+
+def display_path(path: str) -> str:
+    collapsed = str(path).replace("\\", "/")
+    home = _home_collapsed()
+    folded = collapsed.casefold()
+    home_folded = home.casefold()
+    if folded == home_folded:
+        return "~"
+    prefix = home_folded + "/"
+    if folded.startswith(prefix):
+        return "~/" + collapsed[len(home) + 1 :]
+    return collapsed
+
+
+def _home_collapsed() -> str:
+    from pathlib import Path
+
+    return str(Path.home()).replace("\\", "/")
+
+
+def _parts(path: str) -> list[str]:
+    collapsed = str(path).replace("\\", "/")
+    return [part for part in collapsed.split("/") if part not in {"", "."}]
+
+
+def _judge_exec(action: Action, rules: Rules) -> Decision:
+    rendered = " ".join(action.command).strip() or "(empty)"
+    phrase = f"run {rendered}"
+    if destructive_command(action.command):
+        return Decision(False, "no-destructive-exec", phrase)
+    if command_mentions_credential(action.command, rules):
+        return Decision(False, "no-credential-access", phrase)
+    if unbounded_shell(action.command):
+        return Decision(False, "no-unbounded-shell", phrase)
+    if opaque_shell(action.command):
+        return Decision(False, "no-opaque-shell", phrase)
+    return Decision(True, None, phrase)
+
+
+def command_mentions_credential(command: tuple[str, ...], rules: Rules | None = None) -> bool:
+    rules = rules or Rules()
+    blob = " ".join(command).replace("\\", "/")
+    if credential_path(blob, rules):
+        return True
+    return any(credential_path(part.replace("\\", "/"), rules) for part in command)
+
+
+def opaque_shell(command: tuple[str, ...]) -> bool:
+    """A shell script that hides the path is not a fixed command."""
+    if not command or _basename(command[0]) not in _SHELLS:
+        return False
+    script = _shell_script(command[1:])
+    if not script:
+        return False
+    if _OBFUSCATION.search(script):
+        return True
+    if _EXPANSION.search(script) is None:
+        return False
+    return _script_reads(script)
+
+
+def _script_reads(script: str) -> bool:
+    normalized = script.replace("^", "")
+    for piece in re.split(r"[&|\n;]", normalized):
+        words = piece.split()
+        if not words:
+            continue
+        name = _basename(words[0].strip("\"'")).casefold()
+        if name in _READERS:
+            return True
+    return False
+
+
+def unbounded_shell(command: tuple[str, ...]) -> bool:
+    """A shell with no script in argv can read the next command from stdin."""
+    if not command:
+        return False
+    exe = _basename(command[0])
+    if exe not in _SHELLS:
+        return False
+    return not _bounded_script(exe, command[1:])
+
+
+def _bounded_script(exe: str, args: tuple[str, ...]) -> bool:
+    if exe in {"cmd", "cmd.exe"}:
+        return _flag_has_argument(args, {"/c", "-c"})
+    if exe in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+        return _flag_has_argument(args, {"-command", "-c"})
+    return _flag_has_argument(args, {"-c"}) or _cluster_has_argument(args)
+
+
+def _flag_has_argument(args: tuple[str, ...], flags: set[str]) -> bool:
+    for index, arg in enumerate(args):
+        if arg.casefold() in flags and index + 1 < len(args) and args[index + 1].strip():
+            return True
+    return False
+
+
+def _cluster_has_argument(args: tuple[str, ...]) -> bool:
+    """bash -lc 'echo hi' puts the command after a flag cluster that contains c."""
+    for index, arg in enumerate(args):
+        if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]:
+            return index + 1 < len(args) and args[index + 1].strip() != ""
+    return False
+
+
+def destructive_command(command: tuple[str, ...]) -> bool:
+    if not command:
+        return False
+    argv = tuple(command)
+    if _is_rm_rf(argv):
+        return True
+    exe = _basename(argv[0])
+    if exe in _SHELLS:
+        script = _shell_script(argv[1:])
+        if script and _script_runs_rm_rf(script):
+            return True
+    return False
+
+
+def _is_rm_rf(argv: tuple[str, ...]) -> bool:
+    if _basename(argv[0]) not in {"rm", "rm.exe"}:
+        return False
+    return _recursive_and_force(argv[1:])
+
+
+def _recursive_and_force(args: tuple[str, ...]) -> bool:
+    recursive = False
+    force = False
+    for arg in args:
+        if arg == "--":
+            break
+        if arg == "--recursive":
+            recursive = True
+            continue
+        if arg == "--force":
+            force = True
+            continue
+        if arg.startswith("-") and not arg.startswith("--"):
+            letters = arg[1:]
+            if "r" in letters or "R" in letters:
+                recursive = True
+            if "f" in letters:
+                force = True
+    return recursive and force
+
+
+def _shell_script(args: tuple[str, ...]) -> str:
+    """Return the command string from `sh -c`, `cmd /c`, or similar."""
+    tokens = list(args)
+    while tokens and tokens[0] in {"-c", "/c", "-Command", "-command"}:
+        tokens = tokens[1:]
+        break
+    if tokens and tokens[0] in {"-lc", "-cl"}:
+        tokens = tokens[1:]
+    return " ".join(tokens)
+
+
+def _script_runs_rm_rf(script: str) -> bool:
+    try:
+        tokens = shlex.split(script, posix=True)
+    except ValueError:
+        tokens = script.split()
+    for index, token in enumerate(tokens):
+        if _basename(token) in {"rm", "rm.exe"}:
+            if _recursive_and_force(tuple(tokens[index + 1 :])):
+                return True
+    return False
+
+
+def _basename(token: str) -> str:
+    name = token.replace("\\", "/").rsplit("/", 1)[-1]
+    return name.casefold()
+
+
+def _judge_http(action: Action) -> Decision:
+    target = _http_target(action.url)
+    phrase = f"send secrets to {target}"
+    if carries_secret(action.body, action.headers):
+        return Decision(False, "no-secret-exfil", phrase)
+    return Decision(True, None, f"send to {target}")
+
+
+def carries_secret(body: bytes, headers: tuple[tuple[str, str], ...]) -> bool:
+    haystack = body if isinstance(body, (bytes, bytearray)) else b""
+    if _bytes_have_secret(haystack):
+        return True
+    for name, value in headers:
+        blob = f"{name}: {value}".encode("utf-8", "surrogateescape")
+        if _bytes_have_secret(blob):
+            return True
+    return False
+
+
+def _bytes_have_secret(data: bytes) -> bool:
+    if not data:
+        return False
+    if b"-----BEGIN " in data and any(marker in data for marker in _SECRET_MARKERS):
+        return True
+    if _has_aws_access_key(data):
+        return True
+    if _has_github_pat(data):
+        return True
+    return False
+
+
+def _has_aws_access_key(data: bytes) -> bool:
+    start = 0
+    while True:
+        found = data.find(b"AKIA", start)
+        if found < 0:
+            return False
+        suffix = data[found + 4 : found + 20]
+        if len(suffix) == 16 and all(_aws_key_byte(byte) for byte in suffix):
+            return True
+        start = found + 4
+
+
+def _aws_key_byte(byte: int) -> bool:
+    return (48 <= byte <= 57) or (65 <= byte <= 90)
+
+
+def _has_github_pat(data: bytes) -> bool:
+    start = 0
+    prefix = b"ghp_"
+    while True:
+        found = data.find(prefix, start)
+        if found < 0:
+            return False
+        token = data[found + 4 : found + 4 + 36]
+        if len(token) == 36 and all(_github_pat_byte(byte) for byte in token):
+            return True
+        start = found + 4
+
+
+def _github_pat_byte(byte: int) -> bool:
+    return (48 <= byte <= 57) or (65 <= byte <= 90) or (97 <= byte <= 122)
+
+
+def _http_target(url: str) -> str:
+    if not url:
+        return "(unknown destination)"
+    return url.split("?", 1)[0]
+
+
+def judge_tool_call(name: str, arguments: dict, rules: Rules | None = None) -> Decision:
+    """Map an agent tool call onto the same rules as a syscall."""
+    normalized = name.strip().lower().replace("-", "_")
+    if normalized in {"read_file", "read", "open_file", "cat", "fetch_file"}:
+        return judge(Action(kind="file_read", path=str(arguments.get("path", ""))), rules)
+    if normalized in {"write_file", "write", "save_file"}:
+        return judge(Action(kind="file_write", path=str(arguments.get("path", ""))), rules)
+    if normalized in {"shell", "bash", "exec", "run", "command"}:
+        command = arguments.get("command", arguments.get("cmd", ()))
+        return judge(Action(kind="exec", command=_as_command(command)), rules)
+    if normalized in {"http", "fetch", "curl", "request", "post", "get"}:
+        body = arguments.get("body", b"")
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        headers = arguments.get("headers") or {}
+        if isinstance(headers, dict):
+            header_items = tuple((str(key), str(value)) for key, value in headers.items())
+        else:
+            header_items = tuple(headers)
+        return judge(
+            Action(
+                kind="http",
+                url=str(arguments.get("url", "")),
+                body=body,
+                headers=header_items,
+            ),
+            rules,
+        )
+    return Decision(True, None, f"call {name}")
+
+
+def _as_command(command) -> tuple[str, ...]:
+    if isinstance(command, str):
+        try:
+            return tuple(shlex.split(command, posix=True))
+        except ValueError:
+            return tuple(command.split())
+    return tuple(str(part) for part in command)

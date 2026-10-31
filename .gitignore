@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+harnis-report.html
+*.html.tmp
+*.events.jsonl
