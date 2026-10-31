@@ -25,8 +25,8 @@ _SHELLS = frozenset({
     "powershell.exe",
 })
 _NPX = frozenset({"npx", "npx.cmd", "npx.exe"})
-_LAUNCH = "harnis"
-_HARNIS_PACKAGES = frozenset({"harnis", "github:l00plegend/harnis"})
+_LAUNCH = "github:L00PLeGeNd/Harnis"
+_HARNIS_PACKAGES = frozenset({"harnis", _LAUNCH.casefold()})
 
 
 @dataclass(frozen=True)

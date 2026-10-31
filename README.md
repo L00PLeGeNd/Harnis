@@ -5,7 +5,7 @@ Harnis reads the MCP config you already have. A GitHub, Postgres, Slack, or shel
 Requires Python 3.11+.
 
 ```bash
-npx -y harnis scan
+npx -y github:L00PLeGeNd/Harnis scan
 ```
 
 With no path it reads `.cursor/mcp.json`, `.vscode/mcp.json`, and `~/.cursor/mcp.json` when those files exist. A missing file exits 0. A bare catalog server exits 1. The pasted block keeps the server's `env`.
@@ -14,7 +14,7 @@ With no path it reads `.cursor/mcp.json`, `.vscode/mcp.json`, and `~/.cursor/mcp
 github can call delete_file.
 {
   "command": "npx",
-  "args": ["-y", "harnis", "mcp", "--preset", "github", "--", "github-mcp-server", "stdio"]
+  "args": ["-y", "github:L00PLeGeNd/Harnis", "mcp", "--preset", "github", "--", "github-mcp-server", "stdio"]
 }
 ```
 
@@ -29,7 +29,7 @@ In GitHub Actions a missing config succeeds and a bare catalog server fails the 
 The pasted block is a stdio proxy. It judges `tools/call` before the server runs it. A denied call never reaches the server: the client gets a tool error, and the terminal prints one line. That line is also written to `harnis-mcp.html`. `initialize` and `tools/list` pass through unchanged.
 
 ```bash
-npx -y harnis mcp --preset github -- github-mcp-server stdio
+npx -y github:L00PLeGeNd/Harnis mcp --preset github -- github-mcp-server stdio
 ```
 
 ```text

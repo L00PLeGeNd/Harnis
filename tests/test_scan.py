@@ -25,7 +25,7 @@ def test_bare_github_server_asks_for_the_github_preset(tmp_path: Path):
     assert findings[0].snippet["command"] == "npx"
     assert findings[0].snippet["args"] == [
         "-y",
-        "harnis",
+        "github:L00PLeGeNd/Harnis",
         "mcp",
         "--preset",
         "github",
