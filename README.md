@@ -39,9 +39,12 @@ Add paths without replacing the defaults. `policy.json`:
 ```json
 {
   "deny_path_parts": ["vault"],
-  "deny_file_names": ["token.txt"]
+  "deny_file_names": ["token.txt"],
+  "allow_path_parts": ["fixtures"]
 }
 ```
+
+`allow_path_parts` wins for matching path segments, so test fixtures under that name are readable even if they look like credentials.
 
 ```bash
 harnis protect --policy policy.json -- python agent.py
@@ -62,11 +65,24 @@ decision = judge_tool_call("shell", {"command": "rm -rf /tmp/scratch"})
 
 ## Probe your own agent
 
-`harnis probe` loads a script that exports `build_agent()`. The agent must implement `respond(turns) -> Turn`. Harnis sends credential-oriented prompts, including a follow-up on multi-turn chains, and judges every proposed tool call with the runtime policy. A finding includes the full replay. The tool call is not executed.
+`harnis probe` loads a script that exports `build_agent()`, or posts to `--url` with this JSON contract:
+
+```json
+{"messages":[{"role":"user","content":"..."}]}
+```
+
+```json
+{"role":"assistant","content":"...","tool_calls":[{"name":"read_file","arguments":{"path":"..."}}]}
+```
+
+Scenarios: `credential`, `destructive`, `rag`, `escalation`, `exfil`, or `all`. Findings include the full replay. Tool calls are judged, not executed.
 
 ```bash
 harnis probe -- examples/leaky_agent.py
-harnis probe -- examples/safe_agent.py
+harnis probe --scenario rag -- examples/rag_agent.py
+harnis probe --scenario destructive -- examples/shell_agent.py
+python examples/http_echo_agent.py
+harnis probe --url http://127.0.0.1:8765/v1/chat --scenario credential,destructive
 ```
 
 ## Two layers, one policy

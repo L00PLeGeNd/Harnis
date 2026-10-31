@@ -1,14 +1,15 @@
 """Runtime safety sandbox for AI agents."""
 
 from harnis.policy import Action, Decision, Rules, judge, judge_tool_call, load_rules
-from harnis.probe import Finding, ProbeTarget, Turn, probe
+from harnis.probe import Finding, HttpAgent, ProbeTarget, Turn, probe, scenario_pack
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Action",
     "Decision",
     "Finding",
+    "HttpAgent",
     "ProbeTarget",
     "Rules",
     "Turn",
@@ -16,5 +17,6 @@ __all__ = [
     "judge_tool_call",
     "load_rules",
     "probe",
+    "scenario_pack",
     "__version__",
 ]

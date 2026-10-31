@@ -135,6 +135,7 @@ class Rules:
 
     deny_path_parts: frozenset[str] = frozenset()
     deny_file_names: frozenset[str] = frozenset()
+    allow_path_parts: frozenset[str] = frozenset()
 
 
 def load_rules(path: str | None) -> Rules:
@@ -150,6 +151,7 @@ def load_rules(path: str | None) -> Rules:
     return Rules(
         deny_path_parts=_string_set(data.get("deny_path_parts", []), "deny_path_parts"),
         deny_file_names=_string_set(data.get("deny_file_names", []), "deny_file_names"),
+        allow_path_parts=_string_set(data.get("allow_path_parts", []), "allow_path_parts"),
     )
 
 
@@ -202,6 +204,8 @@ def credential_path(path: str, rules: Rules | None = None) -> bool:
     if not parts:
         return False
     folded = [part.casefold() for part in parts]
+    if rules.allow_path_parts and any(part in rules.allow_path_parts for part in folded):
+        return False
     dirs = folded[:-1]
     name = folded[-1]
     if any(part in _CREDENTIAL_DIRS or part in rules.deny_path_parts for part in dirs):

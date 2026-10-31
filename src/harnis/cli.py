@@ -12,13 +12,16 @@ from harnis.runtime import BOOTSTRAP, looks_like_python
 USAGE = """\
 harnis protect -- python agent.py
 harnis probe -- examples/leaky_agent.py
+harnis probe --url http://127.0.0.1:8765/v1/chat --scenario credential,rag
 
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Script prompts against your agent; report tool calls that violate policy.
 
 Options:
-  --report PATH    HTML report (default: harnis-report.html / harnis-probe.html)
-  --policy PATH    JSON file adding deny_path_parts and deny_file_names
+  --report PATH       HTML report (default: harnis-report.html / harnis-probe.html)
+  --policy PATH       JSON file adding deny_path_parts and deny_file_names
+  --url URL           Probe an HTTP agent instead of a local script
+  --scenario LIST     Comma list: credential,destructive,rag,escalation,exfil,all
 """
 
 
@@ -87,6 +90,8 @@ def protect(args: list[str]) -> int:
 def probe_command(args: list[str]) -> int:
     report = Path("harnis-probe.html")
     policy: Path | None = None
+    url: str | None = None
+    scenarios: tuple[str, ...] = ("credential", "destructive")
     rest = list(args)
     while rest and rest[0] != "--":
         flag = rest[0]
@@ -105,17 +110,41 @@ def probe_command(args: list[str]) -> int:
             policy = Path(rest[1])
             rest = rest[2:]
             continue
+        if flag == "--url":
+            if len(rest) < 2:
+                return _error("--url needs an endpoint")
+            url = rest[1]
+            rest = rest[2:]
+            continue
+        if flag == "--scenario":
+            if len(rest) < 2:
+                return _error("--scenario needs a list")
+            scenarios = tuple(
+                part.strip() for part in rest[1].split(",") if part.strip()
+            )
+            if not scenarios:
+                return _error("--scenario needs at least one name")
+            rest = rest[2:]
+            continue
         return _error(f"unknown option {flag}")
-    if not rest or rest[0] != "--" or len(rest) < 2:
-        return _error("usage: harnis probe -- agent.py")
-    agent_path = Path(rest[1])
-    if not agent_path.is_file():
-        return _error(f"agent script not found: {agent_path}")
-    from harnis.probe import probe_script
+
+    from harnis.probe import probe_script, probe_url
     from harnis.report import emit_finding
 
     try:
-        findings = probe_script(agent_path.resolve(), report.resolve(), policy)
+        if url is not None:
+            if rest:
+                return _error("use either --url or -- script.py, not both")
+            findings = probe_url(url, report.resolve(), policy, scenarios)
+        else:
+            if not rest or rest[0] != "--" or len(rest) < 2:
+                return _error("usage: harnis probe -- agent.py")
+            agent_path = Path(rest[1])
+            if not agent_path.is_file():
+                return _error(f"agent script not found: {agent_path}")
+            findings = probe_script(
+                agent_path.resolve(), report.resolve(), policy, scenarios
+            )
     except (OSError, ValueError) as exc:
         return _error(str(exc))
     for finding in findings:

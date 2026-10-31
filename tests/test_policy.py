@@ -277,6 +277,28 @@ def test_extra_policy_file_blocks_a_project_secret(tmp_path: Path):
     assert nested.allowed is False
 
 
+def test_allow_path_parts_override_a_denied_name(tmp_path: Path):
+    policy = tmp_path / "policy.json"
+    policy.write_text(
+        '{"allow_path_parts": ["fixtures"]}\n',
+        encoding="utf-8",
+    )
+    rules = load_rules(str(policy))
+
+    decision = judge(
+        Action(kind="file_read", path="/work/fixtures/.ssh/id_rsa"),
+        rules,
+    )
+
+    assert decision.allowed is True
+    assert decision.policy is None
+    still_blocked = judge(
+        Action(kind="file_read", path="/home/agent/.ssh/id_rsa"),
+        rules,
+    )
+    assert still_blocked.allowed is False
+
+
 def test_tool_call_shell_rm_rf_uses_the_same_policy():
     decision = judge_tool_call(
         "shell", {"command": "rm -rf /tmp/agent-scratch"}
