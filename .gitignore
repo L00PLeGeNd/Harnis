@@ -9,3 +9,4 @@ harnis-mcp.html
 *.html.tmp
 *.events.jsonl
 node_modules/
+*.tgz

@@ -3,14 +3,22 @@
   "version": "0.4.0",
   "description": "Stdio proxy that blocks dangerous MCP tool calls before the server runs them.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/L00PLeGeNd/Harnis.git"
+  },
   "bin": {
-    "harnis": "./bin/harnis.js"
+    "harnis": "bin/harnis.js"
   },
   "files": [
     "bin/harnis.js",
-    "src/harnis"
+    "src/harnis/**/*.py"
   ],
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
