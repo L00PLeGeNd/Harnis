@@ -136,6 +136,7 @@ class Rules:
     deny_path_parts: frozenset[str] = frozenset()
     deny_file_names: frozenset[str] = frozenset()
     allow_path_parts: frozenset[str] = frozenset()
+    preset: str = "coding-agent"
 
 
 def load_rules(path: str | None) -> Rules:
@@ -155,6 +156,23 @@ def load_rules(path: str | None) -> Rules:
     )
 
 
+PRESETS = frozenset({"coding-agent", "readonly", "ci"})
+
+
+def rules_for(preset: str, path: str | None = None) -> Rules:
+    """Built-in posture. A policy file only adds path names on top."""
+    if preset not in PRESETS:
+        names = ", ".join(sorted(PRESETS))
+        raise ValueError(f"unknown preset {preset!r}. Use: {names}")
+    loaded = load_rules(path)
+    return Rules(
+        deny_path_parts=loaded.deny_path_parts,
+        deny_file_names=loaded.deny_file_names,
+        allow_path_parts=loaded.allow_path_parts,
+        preset=preset,
+    )
+
+
 def _string_set(value, field: str) -> frozenset[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must be a list of strings")
@@ -164,16 +182,28 @@ def _string_set(value, field: str) -> frozenset[str]:
 def judge(action: Action, rules: Rules | None = None) -> Decision:
     rules = rules or Rules()
     if action.kind in {"file_read", "file_write"}:
-        return _judge_path(action, rules)
-    if action.kind == "exec":
-        return _judge_exec(action, rules)
-    if action.kind == "http":
-        return _judge_http(action)
-    if action.kind == "ctypes":
-        return _judge_ctypes(action)
-    if action.kind == "socket":
-        return _judge_socket(action)
-    return Decision(True, None, action.kind)
+        decision = _judge_path(action, rules)
+    elif action.kind == "exec":
+        decision = _judge_exec(action, rules)
+    elif action.kind == "http":
+        decision = _judge_http(action)
+    elif action.kind == "ctypes":
+        decision = _judge_ctypes(action)
+    elif action.kind == "socket":
+        decision = _judge_socket(action)
+    else:
+        decision = Decision(True, None, action.kind)
+    return _apply_preset(decision, action, rules)
+
+
+def _apply_preset(decision: Decision, action: Action, rules: Rules) -> Decision:
+    if not decision.allowed:
+        return decision
+    if rules.preset == "readonly" and action.kind in {"file_write", "exec", "http", "socket"}:
+        return Decision(False, "readonly", decision.phrase)
+    if rules.preset == "ci" and action.kind == "exec":
+        return Decision(False, "ci-no-shell", decision.phrase)
+    return decision
 
 
 def _judge_socket(action: Action) -> Decision:
@@ -463,13 +493,38 @@ def _http_target(url: str) -> str:
     return url.split("?", 1)[0]
 
 
+_FILE_READS = frozenset({
+    "read_file",
+    "read_text_file",
+    "read_media_file",
+    "read_multiple_files",
+    "read",
+    "open_file",
+    "cat",
+    "fetch_file",
+})
+_FILE_WRITES = frozenset({
+    "write_file",
+    "edit_file",
+    "write",
+    "save_file",
+})
+
+
 def judge_tool_call(name: str, arguments: dict, rules: Rules | None = None) -> Decision:
     """Map an agent tool call onto the same rules as a syscall."""
     normalized = name.strip().lower().replace("-", "_")
-    if normalized in {"read_file", "read", "open_file", "cat", "fetch_file"}:
-        return judge(Action(kind="file_read", path=str(arguments.get("path", ""))), rules)
-    if normalized in {"write_file", "write", "save_file"}:
-        return judge(Action(kind="file_write", path=str(arguments.get("path", ""))), rules)
+    if normalized in _FILE_READS:
+        return _judge_paths("file_read", arguments, rules)
+    if normalized in _FILE_WRITES:
+        return _judge_paths("file_write", arguments, rules)
+    if normalized == "move_file":
+        source = str(arguments.get("source") or arguments.get("path") or "")
+        destination = str(arguments.get("destination") or arguments.get("dest") or "")
+        read = judge(Action(kind="file_read", path=source), rules)
+        if not read.allowed:
+            return read
+        return judge(Action(kind="file_write", path=destination), rules)
     if normalized in {"shell", "bash", "exec", "run", "command"}:
         command = arguments.get("command", arguments.get("cmd", ()))
         return judge(Action(kind="exec", command=_as_command(command)), rules)
@@ -492,6 +547,31 @@ def judge_tool_call(name: str, arguments: dict, rules: Rules | None = None) -> D
             rules,
         )
     return Decision(True, None, f"call {name}")
+
+
+def _judge_paths(kind: str, arguments: dict, rules: Rules | None) -> Decision:
+    paths = _argument_paths(arguments) or [""]
+    chosen = judge(Action(kind=kind, path=paths[0]), rules)
+    if not chosen.allowed:
+        return chosen
+    for path in paths[1:]:
+        decision = judge(Action(kind=kind, path=path), rules)
+        if not decision.allowed:
+            return decision
+        chosen = decision
+    return chosen
+
+
+def _argument_paths(arguments: dict) -> list[str]:
+    found: list[str] = []
+    for key in ("path", "file_path"):
+        value = arguments.get(key)
+        if value not in (None, ""):
+            found.append(str(value))
+    listed = arguments.get("paths")
+    if isinstance(listed, list):
+        found.extend(str(item) for item in listed)
+    return found
 
 
 def _as_command(command) -> tuple[str, ...]:

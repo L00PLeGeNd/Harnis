@@ -1,4 +1,4 @@
-"""Entry points: harnis protect / harnis probe."""
+"""Entry points: harnis mcp / harnis protect / harnis probe."""
 
 from __future__ import annotations
 
@@ -10,15 +10,17 @@ from pathlib import Path
 from harnis.runtime import BOOTSTRAP, looks_like_python
 
 USAGE = """\
+harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
 harnis protect -- python agent.py
 harnis probe -- examples/leaky_agent.py
-harnis probe --url http://127.0.0.1:8765/v1/chat --scenario credential,rag
 
+mcp      Judge tools/call, then forward the rest to an MCP stdio server.
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Script prompts against your agent; report tool calls that violate policy.
 
 Options:
-  --report PATH       HTML report (default: harnis-report.html / harnis-probe.html)
+  --preset NAME       coding-agent (default), readonly, or ci
+  --report PATH       HTML report
   --policy PATH       JSON file adding deny_path_parts and deny_file_names
   --url URL           Probe an HTTP agent instead of a local script
   --scenario LIST     Comma list: credential,destructive,rag,escalation,exfil,all
@@ -35,15 +37,59 @@ def run(argv: list[str] | None = None) -> int:
         sys.stdout.write(USAGE)
         return 0
     command = args[0]
+    if command == "mcp":
+        return mcp_command(args[1:])
     if command == "protect":
         return protect(args[1:])
     if command == "probe":
         return probe_command(args[1:])
     sys.stderr.write(
-        "harnis: unknown command. Use: harnis protect -- python agent.py\n"
+        "harnis: unknown command. Use: harnis mcp -- <server>\n"
+        "                         or: harnis protect -- python agent.py\n"
         "                         or: harnis probe -- agent.py\n"
     )
     return 2
+
+
+def mcp_command(args: list[str]) -> int:
+    from harnis.mcp_proxy import proxy
+    from harnis.policy import rules_for
+
+    report = Path("harnis-mcp.html")
+    policy: Path | None = None
+    preset = "coding-agent"
+    rest = list(args)
+    while rest and rest[0] != "--":
+        flag = rest[0]
+        if flag in {"-h", "--help"}:
+            sys.stdout.write(USAGE)
+            return 0
+        if flag == "--report":
+            if len(rest) < 2:
+                return _error("--report needs a path")
+            report = Path(rest[1])
+            rest = rest[2:]
+            continue
+        if flag == "--policy":
+            if len(rest) < 2:
+                return _error("--policy needs a path")
+            policy = Path(rest[1])
+            rest = rest[2:]
+            continue
+        if flag == "--preset":
+            if len(rest) < 2:
+                return _error("--preset needs a name")
+            preset = rest[1]
+            rest = rest[2:]
+            continue
+        return _error(f"unknown option {flag}")
+    if not rest or rest[0] != "--" or len(rest) < 2:
+        return _error("usage: harnis mcp -- <server command>")
+    try:
+        rules = rules_for(preset, str(policy) if policy else None)
+    except ValueError as exc:
+        return _error(str(exc))
+    return proxy(rest[1:], rules, report.resolve())
 
 
 def protect(args: list[str]) -> int:

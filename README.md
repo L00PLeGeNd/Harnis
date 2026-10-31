@@ -1,25 +1,68 @@
 # Harnis
 
-Runtime sandbox for AI agents. Block the dangerous action while it runs.
-Probe your own agent for tool calls that would violate the same policy.
+A stdio proxy that judges MCP `tools/call` before the server runs it.
+A denied call never reaches the server. The client gets a tool error, and the terminal prints one line.
 
 ```bash
 pip install -e .
+harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
+```
+
+```text
+🚨 BLOCKED: agent attempted to read ~/.ssh/id_rsa (policy: no-credential-access)
+```
+
+Cursor or Claude Desktop, in `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "harnis",
+      "args": ["mcp", "--preset", "coding-agent", "--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/work"]
+    }
+  }
+}
+```
+
+## Presets
+
+| Preset | What it allows |
+| --- | --- |
+| `coding-agent` | Workspace read and write. Still denies credential paths, `rm -rf`, an unbounded or opaque shell, and a body that carries a key or token |
+| `readonly` | Reads that are not credentials. Writes, shell, and outbound HTTP or sockets are denied |
+| `ci` | The coding-agent file rules, and every shell call is denied |
+
+```bash
+harnis mcp --preset readonly -- npx -y @modelcontextprotocol/server-filesystem /work
+```
+
+A blocked call is recorded in `harnis-mcp.html`. Other JSON-RPC messages, including `initialize` and `tools/list`, are forwarded unchanged.
+
+## Also: protect and probe
+
+`protect` is the in-process guard for a Python agent. `probe` asks your own agent for tool calls and reports the ones this proxy would refuse. Probe does not execute the call and does not attack third parties.
+
+```bash
 harnis protect -- python examples/curious_agent.py
 harnis probe -- examples/leaky_agent.py
 ```
 
 ```text
-🚨 BLOCKED: agent attempted to read ~/.ssh/id_rsa (policy: no-credential-access)
 🚨 BLOCKED: agent attempted to run rm -rf /tmp/harnis-scratch (policy: no-destructive-exec)
 🚨 BLOCKED: agent attempted to send secrets to https://collect.example/upload (policy: no-secret-exfil)
-```
-
-```text
 FINDING: agent offered to read /home/agent/.ssh/id_rsa (policy: no-credential-access)
 ```
 
-Runtime denials go to `harnis-report.html`. Probe findings go to `harnis-probe.html` with a replay of the conversation and tool calls. Probe judges proposed tool calls; it does not attack third-party systems.
+Runtime denials go to `harnis-report.html`. Probe findings go to `harnis-probe.html`.
+
+In GitHub Actions:
+
+```yaml
+- uses: L00PLeGeNd/Harnis/.github/actions/probe@main
+  with:
+    agent: examples/leaky_agent.py
+```
 
 ## What the default policy stops
 
@@ -95,7 +138,7 @@ For a command that is not Python, Linux x86_64 uses ptrace. `open`, `openat`, `e
 harnis protect -- bash agent.sh
 ```
 
-On Windows that form exits with a short message. eBPF is not in 0.1.
+On Windows that form exits with a short message. ptrace is the optional Linux backend. eBPF is not part of this release.
 
 ## Limits
 
