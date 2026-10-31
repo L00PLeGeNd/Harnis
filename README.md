@@ -1,38 +1,47 @@
 # Harnis
 
-A stdio proxy for MCP servers. It judges `tools/call` before the server runs it. A denied call never reaches the server: the client gets a tool error, and the terminal prints one line.
+Harnis reads the MCP config you already have. A GitHub, Postgres, Slack, or shell server that is not wrapped gets one sentence and a block you can paste back. A filesystem server is left alone.
 
 Requires Python 3.11+.
 
 ```bash
-pip install "harnis @ git+https://github.com/L00PLeGeNd/Harnis.git"
-harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
+npx -y github:L00PLeGeNd/Harnis scan
 ```
+
+With no path it reads `.cursor/mcp.json`. Pass a path to read another file. A missing file exits 0. A bare catalog server exits 1.
 
 ```text
-🚨 BLOCKED: agent attempted to read ~/.ssh/id_rsa (policy: no-credential-access)
+github can call delete_file.
+{
+  "command": "npx",
+  "args": ["-y", "github:L00PLeGeNd/Harnis", "mcp", "--preset", "github", "--", "github-mcp-server", "stdio"]
+}
 ```
 
-That line is also written to `harnis-mcp.html`. `initialize` and `tools/list` pass through unchanged.
+In GitHub Actions a missing config succeeds and a bare catalog server fails the job:
+
+```yaml
+- uses: L00PLeGeNd/Harnis/.github/actions/scan@main
+```
 
 ## In front of a server
 
-Cursor or Claude Desktop, `mcp.json`:
+The pasted block is a stdio proxy. It judges `tools/call` before the server runs it. A denied call never reaches the server: the client gets a tool error, and the terminal prints one line. That line is also written to `harnis-mcp.html`. `initialize` and `tools/list` pass through unchanged.
 
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "harnis",
-      "args": ["mcp", "--preset", "coding-agent", "--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/work"]
-    }
-  }
-}
+```bash
+npx -y github:L00PLeGeNd/Harnis mcp --preset github -- github-mcp-server stdio
+```
+
+```text
+🚨 BLOCKED: agent attempted to delete a file on GitHub (policy: github-delete)
 ```
 
 | Preset | What it does |
 | --- | --- |
-| `coding-agent` | Default. Workspace read and write stay open. Credential paths, `rm -rf`, an unbounded or opaque shell, and a body carrying a key or token are denied |
+| `github` | Reads of files and issues stay open. `delete_file` is denied. Writes to `main`, `master`, or an omitted branch are denied |
+| `postgres` | Read-only SQL stays open. `postgres_mcp_modify`, `DROP`, `TRUNCATE`, and `DELETE` are denied |
+| `slack` | Ordinary posts stay open. A post carrying a key or token is denied |
+| `coding-agent` | Default for other servers. Workspace read and write stay open. Credential paths, `rm -rf`, an unbounded or opaque shell, and a body carrying a key or token are denied |
 | `readonly` | Reads that are not credentials. Writes, shell, and outbound sends are denied |
 | `ci` | The coding-agent file rules, plus every shell call |
 

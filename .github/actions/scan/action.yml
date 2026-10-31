@@ -1,0 +1,16 @@
+name: Harnis scan
+description: Fail the job when a committed mcp.json leaves a dangerous server unwrapped
+inputs:
+  config:
+    description: MCP client config to read
+    required: false
+    default: .cursor/mcp.json
+runs:
+  using: composite
+  steps:
+    - name: Install Harnis
+      shell: bash
+      run: python -m pip install "harnis @ git+https://github.com/L00PLeGeNd/Harnis.git"
+    - name: Scan the MCP config
+      shell: bash
+      run: python -m harnis scan "${{ inputs.config }}"

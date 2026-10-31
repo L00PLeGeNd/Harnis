@@ -10,17 +10,19 @@ from pathlib import Path
 from harnis.runtime import BOOTSTRAP, looks_like_python
 
 USAGE = """\
+harnis scan
 harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
 harnis protect -- python agent.py
 harnis probe -- examples/leaky_agent.py
 harnis probe --transcript session.jsonl
 
+scan     Read mcp.json and print a wrap for a server that can change something.
 mcp      Judge tools/call, then forward the rest to an MCP stdio server.
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Judge tool calls the MCP proxy would refuse. A transcript is not executed.
 
 Options:
-  --preset NAME       coding-agent (default), readonly, or ci
+  --preset NAME       coding-agent (default), readonly, ci, github, postgres, or slack
   --report PATH       HTML report
   --policy PATH       JSON file adding deny_path_parts and deny_file_names
   --url URL           Probe an HTTP agent instead of a local script
@@ -39,6 +41,8 @@ def run(argv: list[str] | None = None) -> int:
         sys.stdout.write(USAGE)
         return 0
     command = args[0]
+    if command == "scan":
+        return scan_command(args[1:])
     if command == "mcp":
         return mcp_command(args[1:])
     if command == "protect":
@@ -46,11 +50,35 @@ def run(argv: list[str] | None = None) -> int:
     if command == "probe":
         return probe_command(args[1:])
     sys.stderr.write(
-        "harnis: unknown command. Use: harnis mcp -- <server>\n"
+        "harnis: unknown command. Use: harnis scan [mcp.json]\n"
+        "                         or: harnis mcp -- <server>\n"
         "                         or: harnis protect -- python agent.py\n"
         "                         or: harnis probe -- agent.py\n"
     )
     return 2
+
+
+def scan_command(args: list[str]) -> int:
+    import json
+
+    from harnis.scan import scan_config
+
+    if args and args[0] in {"-h", "--help"}:
+        sys.stdout.write(USAGE)
+        return 0
+    if len(args) > 1:
+        return _error("usage: harnis scan [mcp.json]")
+    path = Path(args[0]) if args else None
+    try:
+        findings = scan_config(path)
+    except (OSError, ValueError) as exc:
+        return _error(str(exc))
+    if not findings:
+        return 0
+    for finding in findings:
+        sys.stdout.write(finding.sentence() + "\n")
+        sys.stdout.write(json.dumps(finding.snippet, indent=2) + "\n")
+    return 1
 
 
 def mcp_command(args: list[str]) -> int:

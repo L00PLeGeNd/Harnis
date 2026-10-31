@@ -156,7 +156,12 @@ def load_rules(path: str | None) -> Rules:
     )
 
 
-PRESETS = frozenset({"coding-agent", "readonly", "ci"})
+PRESETS = frozenset({"coding-agent", "readonly", "ci", "github", "postgres", "slack"})
+_DEFAULT_BRANCHES = frozenset({"main", "master"})
+_READ_SQL = frozenset({"select", "with", "explain", "show"})
+_WRITE_SQL = frozenset({"drop", "truncate", "delete"})
+_SQL_STRING = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"")
+_SQL_COMMENT = re.compile(r"/\*.*?\*/|--.*?$", re.DOTALL | re.MULTILINE)
 
 
 def rules_for(preset: str, path: str | None = None) -> Rules:
@@ -519,7 +524,15 @@ _FILE_WRITES = frozenset({
 
 def judge_tool_call(name: str, arguments: dict, rules: Rules | None = None) -> Decision:
     """Map an agent tool call onto the same rules as a syscall."""
+    rules = rules or Rules()
     normalized = name.strip().lower().replace("-", "_")
+    decision = _dispatch_tool(name, normalized, arguments, rules)
+    if not decision.allowed:
+        return decision
+    return _server_preset(normalized, arguments, rules) or decision
+
+
+def _dispatch_tool(name: str, normalized: str, arguments: dict, rules: Rules) -> Decision:
     if normalized in _FILE_READS:
         return _judge_paths("file_read", arguments, rules)
     if normalized in _FILE_WRITES:
@@ -553,6 +566,70 @@ def judge_tool_call(name: str, arguments: dict, rules: Rules | None = None) -> D
             rules,
         )
     return Decision(True, None, f"call {name}")
+
+
+def _server_preset(name: str, arguments: dict, rules: Rules) -> Decision | None:
+    if rules.preset == "github":
+        return _github_preset(name, arguments)
+    if rules.preset == "postgres":
+        return _postgres_preset(name, arguments)
+    if rules.preset == "slack":
+        return _slack_preset(arguments, name)
+    return None
+
+
+def _github_preset(name: str, arguments: dict) -> Decision | None:
+    if name == "delete_file":
+        return Decision(False, "github-delete", "delete a file on GitHub")
+    if name in {"push_files", "create_or_update_file"} and _on_default_branch(arguments):
+        return Decision(False, "github-default-branch", "write the default branch on GitHub")
+    return None
+
+
+def _on_default_branch(arguments: dict) -> bool:
+    branch = arguments.get("branch")
+    if branch in (None, ""):
+        return True
+    return str(branch).casefold() in _DEFAULT_BRANCHES
+
+
+def _postgres_preset(name: str, arguments: dict) -> Decision | None:
+    if name == "postgres_mcp_modify":
+        return Decision(False, "postgres-modify", "modify the database")
+    if name in {"postgres_mcp_query", "query"} and not _sql_is_read(_sql_text(arguments)):
+        return Decision(False, "postgres-modify", "modify the database")
+    return None
+
+
+def _sql_text(arguments: dict) -> str:
+    for key in ("sql", "query"):
+        value = arguments.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _sql_is_read(sql: str) -> bool:
+    words = _sql_words(sql)
+    if not words or words[0] not in _READ_SQL:
+        return False
+    return not any(word in _WRITE_SQL for word in words)
+
+
+def _sql_words(sql: str) -> list[str]:
+    without_strings = _SQL_STRING.sub(" ", sql)
+    without_comments = _SQL_COMMENT.sub(" ", without_strings)
+    return re.findall(r"[a-z_]+", without_comments.casefold())
+
+
+def _slack_preset(arguments: dict, name: str) -> Decision | None:
+    if name not in {"slack_post_message", "post_message"}:
+        return None
+    for key in ("text", "message", "content"):
+        value = arguments.get(key)
+        if isinstance(value, str) and carries_secret(value.encode("utf-8"), ()):
+            return Decision(False, "no-secret-exfil", "send secrets in a Slack message")
+    return None
 
 
 def _judge_paths(kind: str, arguments: dict, rules: Rules | None) -> Decision:
