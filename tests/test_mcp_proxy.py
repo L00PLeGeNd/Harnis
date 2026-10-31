@@ -196,10 +196,8 @@ def test_proxy_process_hides_a_secret_read_from_the_server(tmp_path: Path):
         "method": "tools/call",
         "params": {"name": "read_file", "arguments": {"path": "/work/main.py"}},
     }
-    proc.stdin.write((json.dumps(secret) + "\n").encode("utf-8"))
-    proc.stdin.write((json.dumps(ordinary) + "\n").encode("utf-8"))
-    proc.stdin.close()
-    stdout, stderr = proc.communicate(timeout=15)
+    payload = (json.dumps(secret) + "\n" + json.dumps(ordinary) + "\n").encode("utf-8")
+    stdout, stderr = proc.communicate(payload, timeout=15)
 
     blocked = json.loads(stdout.splitlines()[0].decode("utf-8"))
     allowed = json.loads(stdout.splitlines()[1].decode("utf-8"))
