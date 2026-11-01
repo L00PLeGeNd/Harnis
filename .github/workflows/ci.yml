@@ -21,6 +21,15 @@ jobs:
         run: python -m pip install -e . pytest
       - name: Test
         run: python -m pytest -q
+      - name: Init smoke
+        shell: bash
+        run: |
+          root=$(mktemp -d)
+          mkdir -p "$root/.cursor"
+          printf '%s\n' '{"mcpServers":{"github":{"command":"github-mcp-server","args":["stdio"]}}}' > "$root/.cursor/mcp.json"
+          cd "$root"
+          python -m harnis init
+          python -m harnis status
 
   ptrace:
     runs-on: ubuntu-latest
