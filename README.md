@@ -1,8 +1,10 @@
 # Harnis
 
-Other MCP guards ask you to write a policy. Harnis reads the `mcp.json` you already have, names the tool that can hurt you (`delete_file`, `postgres_mcp_modify`, …), and wraps that server in place.
+[![npm](https://img.shields.io/npm/v/harnis.svg)](https://www.npmjs.com/package/harnis)
+[![CI](https://github.com/L00PLeGeNd/Harnis/actions/workflows/ci.yml/badge.svg)](https://github.com/L00PLeGeNd/Harnis/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Requires Python 3.11+.
+Stdio proxy for MCP. Reads the `mcp.json` you already have, names the tool that can hurt you, and wraps that server before it runs.
 
 ```bash
 npx -y harnis scan --apply
@@ -13,15 +15,17 @@ github can call delete_file.
 wrapped github in .cursor/mcp.json
 ```
 
-A filesystem server is left alone. `--apply` keeps `mcp.json.bak`. Without `--apply`, scan only prints the paste block and exits 1 so CI can fail a bare catalog server. Default paths: `.cursor/mcp.json`, `.vscode/mcp.json`, `~/.cursor/mcp.json`. The wrap keeps the server's `env`.
+Python 3.11+. Filesystem servers stay alone. `--apply` keeps `mcp.json.bak`. Without it, scan prints the paste block and exits 1 for CI.
 
 ```yaml
 - uses: L00PLeGeNd/Harnis/.github/actions/scan@main
 ```
 
-## In front of a server
+---
 
-The pasted block is a stdio proxy. It judges `tools/call` before the server runs it. A denied call never reaches the server: the client gets a tool error, and the terminal prints one line. That line is also written to `harnis-mcp.html`. `initialize` and `tools/list` pass through unchanged.
+## Proxy
+
+Judges `tools/call` before the server sees it. A denial never reaches the server — the client gets a tool error, the terminal prints one line, and `harnis-mcp.html` records it. `initialize` and `tools/list` pass through.
 
 ```bash
 npx -y harnis mcp --preset github -- github-mcp-server stdio
@@ -31,33 +35,31 @@ npx -y harnis mcp --preset github -- github-mcp-server stdio
 🚨 BLOCKED: agent attempted to delete a file on GitHub (policy: github-delete)
 ```
 
-| Preset | What it does |
-| --- | --- |
-| `github` | Reads of files and issues stay open. `delete_file` is denied. Writes to `main`, `master`, or an omitted branch are denied |
-| `postgres` | Read-only SQL stays open. `postgres_mcp_modify`, `DROP`, `TRUNCATE`, and `DELETE` are denied |
-| `slack` | Ordinary posts stay open. A post carrying a key or token is denied |
-| `coding-agent` | Default for other servers. Workspace read and write stay open. Credential paths, `rm -rf`, an unbounded or opaque shell, and a body carrying a key or token are denied |
-| `readonly` | Reads that are not credentials. Writes, shell, and outbound sends are denied |
-| `ci` | The coding-agent file rules, plus every shell call |
+| Preset | Allows | Denies |
+| --- | --- | --- |
+| `github` | File and issue reads, feature-branch writes, `merge_pull_request` | `delete_file`; writes to `main` / `master` / omitted branch |
+| `postgres` | `SELECT` / `WITH` / `EXPLAIN` / `SHOW` | `postgres_mcp_modify`, `DROP`, `TRUNCATE`, `DELETE` |
+| `slack` | Ordinary posts | Posts that carry a key or token |
+| `coding-agent` | Workspace read and write | Credential paths, `rm -rf`, unbounded / opaque shell, secret bodies |
+| `readonly` | Non-credential reads | Writes, shell, outbound sends |
+| `ci` | Same file rules as coding-agent | Every shell call |
 
-```bash
-harnis mcp --preset readonly -- npx -y @modelcontextprotocol/server-filesystem /work
-```
+Default paths for scan: `.cursor/mcp.json`, `.vscode/mcp.json`, `~/.cursor/mcp.json`. The wrap keeps the server's `env`.
 
-## What gets denied
+---
+
+## Policy
 
 | Action | Policy |
 | --- | --- |
-| Read or write `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, private key files, `.env` | `no-credential-access` |
-| `rm -rf`, including through `bash -c` and `os.system` | `no-destructive-exec` |
-| A shell with no script (`cmd`, `powershell`, `bash`). The next command could come from stdin | `no-unbounded-shell` |
-| A shell script that hides the path with variables, `^`, `[char]`, or base64 | `no-opaque-shell` |
-| `ctypes` resolving file or process APIs such as `CreateFileW`, `open`, or `execve` | `no-ctypes-bypass` |
-| An HTTP body, header, or socket send carrying a private key, an `AKIA…` key, or a `ghp_…` token | `no-secret-exfil` |
+| `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, private keys, `.env` | `no-credential-access` |
+| `rm -rf` (including `bash -c` / `os.system`) | `no-destructive-exec` |
+| Shell with no script (`cmd`, `powershell`, `bash`) | `no-unbounded-shell` |
+| Path hidden with `%VAR%`, `^`, `[char]`, base64 | `no-opaque-shell` |
+| `ctypes` resolving `CreateFileW`, `open`, `execve`, … | `no-ctypes-bypass` |
+| HTTP / socket body with a private key, `AKIA…`, or `ghp_…` | `no-secret-exfil` |
 
-On the filesystem server, `list_directory`, `directory_tree`, `search_files`, and `get_file_info` count as reads. Listing `~/.ssh` is denied. Listing `/work` is allowed. `create_directory` counts as a write.
-
-Add names on top of the defaults with `--policy`. `allow_path_parts` wins when a path segment matches, so a fixture directory can keep a realistic name.
+On a filesystem server, `list_directory`, `directory_tree`, `search_files`, and `get_file_info` count as reads — listing `~/.ssh` is denied, listing `/work` is allowed. `create_directory` is a write.
 
 ```json
 {
@@ -71,27 +73,22 @@ Add names on top of the defaults with `--policy`. `allow_path_parts` wins when a
 harnis mcp --policy policy.json -- npx -y @modelcontextprotocol/server-filesystem /work
 ```
 
-## Check a session without running it
+`allow_path_parts` wins when a path segment matches.
 
-`harnis probe` uses the same `tools/call` decision as the proxy. It reports the call. It does not run it, and it does not attack other systems.
+---
 
-A recorded session, one JSON-RPC message per line:
+## Probe
+
+Same `tools/call` decision as the proxy. Reports the call. Does not run it. Does not attack other systems.
 
 ```bash
 harnis probe --transcript session.jsonl
-```
-
-A local agent that exports `build_agent()`, or an HTTP endpoint that accepts `{"messages":[...]}` and returns `{"role","content","tool_calls":[{"name","arguments"}]}`:
-
-```bash
 harnis probe -- examples/leaky_agent.py
 harnis probe --scenario rag -- examples/rag_agent.py
 harnis probe --url http://127.0.0.1:8765/v1/chat --scenario credential,destructive
 ```
 
-Scenarios: `credential`, `destructive`, `rag`, `escalation`, `exfil`, or `all`. Findings go to `harnis-probe.html`.
-
-In GitHub Actions:
+Scenarios: `credential`, `destructive`, `rag`, `escalation`, `exfil`, `all`. Findings → `harnis-probe.html`.
 
 ```yaml
 - uses: L00PLeGeNd/Harnis/.github/actions/probe@main
@@ -99,9 +96,11 @@ In GitHub Actions:
     agent: examples/leaky_agent.py
 ```
 
-## Python agents
+---
 
-`harnis protect` is the in-process guard for a Python program. A denial raises `PermissionError` before the call returns. The process exits non-zero if anything was blocked, including when the agent catches the error. The page is `harnis-report.html`.
+## Protect
+
+In-process guard for a Python agent. Denial raises `PermissionError` before the call returns. Exit is non-zero if anything was blocked — even if the agent catches it. Report → `harnis-report.html`.
 
 ```bash
 harnis protect -- python examples/curious_agent.py
@@ -112,9 +111,7 @@ harnis protect -- python examples/curious_agent.py
 🚨 BLOCKED: agent attempted to send secrets to https://collect.example/upload (policy: no-secret-exfil)
 ```
 
-The hook covers CPython `open`, `subprocess`, `os.system`, `urllib`, `http.client`, and `ssl.SSLSocket.send`, including a child Python the agent starts. On Linux x86_64, a non-Python command is supervised with ptrace (`open`, `openat`, `execve`, `execveat`). On Windows, use the Python form.
-
-From your own code, the same decision:
+Covers CPython `open`, `subprocess`, `os.system`, `urllib`, `http.client`, `ssl.SSLSocket.send`, and child Python processes. Linux x86_64 non-Python commands use ptrace. On Windows, use the Python form.
 
 ```python
 from harnis import judge_tool_call
@@ -124,9 +121,11 @@ decision.allowed  # False
 decision.line()
 ```
 
+---
+
 ## Limits
 
-A `ctypes` call through a raw address is outside the audit hook. A shell started with `shell=True` is not re-injected. Harnis reports the denied action, the policy, and the time. Probe does not generate an exploit.
+Raw-address `ctypes` is outside the audit hook. `shell=True` children are not re-injected. Probe does not generate exploits.
 
 ## Development
 
@@ -135,4 +134,4 @@ pip install -e .
 python -m pytest
 ```
 
-MIT. See [LICENSE](LICENSE).
+MIT · [LICENSE](LICENSE)

@@ -77,7 +77,14 @@ def _forward_or_block(raw: bytes, server: subprocess.Popen, rules: Rules, sessio
     if not session.already_recorded(decision):
         session.record(decision)
         emit(decision)
-    response = handle_client_message(message or {}, rules)
+    response = {
+        "jsonrpc": "2.0",
+        "id": (message or {}).get("id"),
+        "result": {
+            "content": [{"type": "text", "text": decision.line()}],
+            "isError": True,
+        },
+    }
     payload = json.dumps(response, ensure_ascii=False).encode("utf-8") + b"\n"
     sys.stdout.buffer.write(payload)
     sys.stdout.buffer.flush()

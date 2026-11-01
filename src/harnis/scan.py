@@ -14,16 +14,11 @@ _PACKAGES: tuple[tuple[str, str, str], ...] = (
     ("postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("@modelcontextprotocol/server-slack", "slack", "slack_post_message"),
 )
-_SHELLS = frozenset({
-    "bash",
-    "sh",
-    "cmd",
-    "powershell",
-    "bash.exe",
-    "sh.exe",
-    "cmd.exe",
-    "powershell.exe",
-})
+_SHELLS = frozenset(
+    name
+    for base in ("bash", "sh", "cmd", "powershell")
+    for name in (base, f"{base}.exe")
+)
 _NPX = frozenset({"npx", "npx.cmd", "npx.exe"})
 _LAUNCH = "harnis"
 _HARNIS_PACKAGES = frozenset({"harnis", "github:l00plegend/harnis"})
@@ -66,12 +61,11 @@ def scan_config(path: Path | None = None) -> list[ConfigFinding]:
 
 def apply_wraps(path: Path | None = None) -> list[ConfigFinding]:
     """Rewrite bare catalog servers in place. Keep a .bak next to each changed file."""
-    applied: list[ConfigFinding] = []
     by_file: dict[Path, list[ConfigFinding]] = {}
     for finding in scan_config(path):
-        if finding.path is None:
-            continue
-        by_file.setdefault(finding.path, []).append(finding)
+        if finding.path is not None:
+            by_file.setdefault(finding.path, []).append(finding)
+    applied: list[ConfigFinding] = []
     for file, findings in by_file.items():
         _apply_file(file, findings)
         applied.extend(findings)
