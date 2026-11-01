@@ -25,8 +25,8 @@ _SHELLS = frozenset({
     "powershell.exe",
 })
 _NPX = frozenset({"npx", "npx.cmd", "npx.exe"})
-_LAUNCH = "github:L00PLeGeNd/Harnis"
-_HARNIS_PACKAGES = frozenset({"harnis", _LAUNCH.casefold()})
+_LAUNCH = "harnis"
+_HARNIS_PACKAGES = frozenset({"harnis", "github:l00plegend/harnis"})
 
 
 @dataclass(frozen=True)
@@ -35,17 +35,26 @@ class ConfigFinding:
     preset: str
     tool: str
     snippet: dict
+    path: Path | None = None
 
     def sentence(self) -> str:
         return f"{self.server} can call {self.tool}."
 
 
+def scan_files(path: Path | None = None) -> list[Path]:
+    """Config files a scan would read. Missing explicit paths are still listed."""
+    if path is not None:
+        return [Path(path)]
+    return _default_files()
+
+
 def scan_config(path: Path | None = None) -> list[ConfigFinding]:
     """Return one finding per catalog server that is not wrapped with its preset."""
-    files = [Path(path)] if path is not None else _default_files()
     findings: list[ConfigFinding] = []
     seen: set[str] = set()
-    for file in files:
+    for file in scan_files(path):
+        if path is not None and not file.is_file():
+            continue
         for finding in _scan_file(file):
             key = json.dumps(finding.snippet, sort_keys=True, ensure_ascii=False)
             if key in seen:
@@ -53,6 +62,20 @@ def scan_config(path: Path | None = None) -> list[ConfigFinding]:
             seen.add(key)
             findings.append(finding)
     return findings
+
+
+def apply_wraps(path: Path | None = None) -> list[ConfigFinding]:
+    """Rewrite bare catalog servers in place. Keep a .bak next to each changed file."""
+    applied: list[ConfigFinding] = []
+    by_file: dict[Path, list[ConfigFinding]] = {}
+    for finding in scan_config(path):
+        if finding.path is None:
+            continue
+        by_file.setdefault(finding.path, []).append(finding)
+    for file, findings in by_file.items():
+        _apply_file(file, findings)
+        applied.extend(findings)
+    return applied
 
 
 def _default_files() -> list[Path]:
@@ -94,9 +117,28 @@ def _scan_file(file: Path) -> list[ConfigFinding]:
                 preset=preset,
                 tool=tool,
                 snippet=snippet,
+                path=file,
             )
         )
     return findings
+
+
+def _apply_file(file: Path, findings: list[ConfigFinding]) -> None:
+    original = file.read_text(encoding="utf-8")
+    data = json.loads(original)
+    if not isinstance(data, dict):
+        raise ValueError(f"{file}: not a JSON object")
+    by_name = {finding.server: finding.snippet for finding in findings}
+    for key in ("mcpServers", "servers"):
+        value = data.get(key)
+        if not isinstance(value, dict):
+            continue
+        for name, snippet in by_name.items():
+            if name in value:
+                value[name] = snippet
+    backup = file.with_name(file.name + ".bak")
+    backup.write_text(original, encoding="utf-8")
+    file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _servers(data: dict) -> dict:

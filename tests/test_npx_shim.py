@@ -33,4 +33,4 @@ def test_npx_bin_scans_a_config(tmp_path: Path):
     )
     assert result.returncode == 1
     assert "delete_file" in result.stdout
-    assert "github:L00PLeGeNd/Harnis" in result.stdout
+    assert "harnis" in result.stdout

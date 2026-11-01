@@ -1,24 +1,19 @@
 # Harnis
 
-Harnis reads the MCP config you already have. A GitHub, Postgres, Slack, or shell server that is not wrapped gets one sentence and a block you can paste back. A filesystem server is left alone.
+Other MCP guards ask you to write a policy. Harnis reads the `mcp.json` you already have, names the tool that can hurt you (`delete_file`, `postgres_mcp_modify`, …), and wraps that server in place.
 
 Requires Python 3.11+.
 
 ```bash
-npx -y github:L00PLeGeNd/Harnis scan
+npx -y harnis scan --apply
 ```
-
-With no path it reads `.cursor/mcp.json`, `.vscode/mcp.json`, and `~/.cursor/mcp.json` when those files exist. A missing file exits 0. A bare catalog server exits 1. The pasted block keeps the server's `env`.
 
 ```text
 github can call delete_file.
-{
-  "command": "npx",
-  "args": ["-y", "github:L00PLeGeNd/Harnis", "mcp", "--preset", "github", "--", "github-mcp-server", "stdio"]
-}
+wrapped github in .cursor/mcp.json
 ```
 
-In GitHub Actions a missing config succeeds and a bare catalog server fails the job:
+A filesystem server is left alone. `--apply` keeps `mcp.json.bak`. Without `--apply`, scan only prints the paste block and exits 1 so CI can fail a bare catalog server. Default paths: `.cursor/mcp.json`, `.vscode/mcp.json`, `~/.cursor/mcp.json`. The wrap keeps the server's `env`.
 
 ```yaml
 - uses: L00PLeGeNd/Harnis/.github/actions/scan@main
@@ -29,7 +24,7 @@ In GitHub Actions a missing config succeeds and a bare catalog server fails the 
 The pasted block is a stdio proxy. It judges `tools/call` before the server runs it. A denied call never reaches the server: the client gets a tool error, and the terminal prints one line. That line is also written to `harnis-mcp.html`. `initialize` and `tools/list` pass through unchanged.
 
 ```bash
-npx -y github:L00PLeGeNd/Harnis mcp --preset github -- github-mcp-server stdio
+npx -y harnis mcp --preset github -- github-mcp-server stdio
 ```
 
 ```text

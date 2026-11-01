@@ -11,17 +11,19 @@ from harnis.runtime import BOOTSTRAP, looks_like_python
 
 USAGE = """\
 harnis scan
+harnis scan --apply
 harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
 harnis protect -- python agent.py
 harnis probe -- examples/leaky_agent.py
 harnis probe --transcript session.jsonl
 
-scan     Read mcp.json and print a wrap for a server that can change something.
+scan     Read mcp.json. Name the dangerous tool and print a wrap, or --apply it.
 mcp      Judge tools/call, then forward the rest to an MCP stdio server.
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Judge tool calls the MCP proxy would refuse. A transcript is not executed.
 
 Options:
+  --apply             Rewrite bare catalog servers in mcp.json. Keep a .bak copy
   --preset NAME       coding-agent (default), readonly, ci, github, postgres, or slack
   --report PATH       HTML report
   --policy PATH       JSON file adding deny_path_parts and deny_file_names
@@ -61,24 +63,41 @@ def run(argv: list[str] | None = None) -> int:
 def scan_command(args: list[str]) -> int:
     import json
 
-    from harnis.scan import scan_config
+    from harnis.scan import apply_wraps, scan_config, scan_files
 
     if args and args[0] in {"-h", "--help"}:
         sys.stdout.write(USAGE)
         return 0
-    if len(args) > 1:
-        return _error("usage: harnis scan [mcp.json]")
-    path = Path(args[0]) if args else None
+    apply = False
+    path: Path | None = None
+    rest = list(args)
+    while rest:
+        flag = rest.pop(0)
+        if flag == "--apply":
+            apply = True
+            continue
+        if path is not None:
+            return _error("usage: harnis scan [--apply] [mcp.json]")
+        path = Path(flag)
     try:
-        findings = scan_config(path)
+        findings = apply_wraps(path) if apply else scan_config(path)
     except (OSError, ValueError) as exc:
         return _error(str(exc))
     if not findings:
+        files = scan_files(path)
+        if not files or (path is not None and not path.is_file()):
+            sys.stderr.write("harnis: no mcp.json found\n")
+        else:
+            listed = ", ".join(str(file) for file in files)
+            sys.stderr.write(f"harnis: scanned {listed}; nothing to wrap\n")
         return 0
     for finding in findings:
         sys.stdout.write(finding.sentence() + "\n")
-        sys.stdout.write(json.dumps(finding.snippet, indent=2) + "\n")
-    return 1
+        if apply and finding.path is not None:
+            sys.stdout.write(f"wrapped {finding.server} in {finding.path}\n")
+        else:
+            sys.stdout.write(json.dumps(finding.snippet, indent=2) + "\n")
+    return 0 if apply else 1
 
 
 def mcp_command(args: list[str]) -> int:

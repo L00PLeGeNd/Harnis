@@ -25,7 +25,7 @@ def test_bare_github_server_asks_for_the_github_preset(tmp_path: Path):
     assert findings[0].snippet["command"] == "npx"
     assert findings[0].snippet["args"] == [
         "-y",
-        "github:L00PLeGeNd/Harnis",
+        "harnis",
         "mcp",
         "--preset",
         "github",
@@ -219,3 +219,59 @@ def test_scan_cli_exits_1_and_prints_the_snippet(tmp_path: Path, capsys):
     assert "delete_file" in output
     assert '"github"' in output
     assert run(["scan", str(tmp_path / "missing.json")]) == 0
+
+
+def test_apply_wraps_the_github_server_and_keeps_a_backup(tmp_path: Path):
+    from harnis.scan import apply_wraps
+
+    config = tmp_path / "mcp.json"
+    _write(config, {"github": {"command": "github-mcp-server", "args": ["stdio"]}})
+
+    applied = apply_wraps(config)
+
+    assert len(applied) == 1
+    assert applied[0].tool == "delete_file"
+    data = json.loads(config.read_text(encoding="utf-8"))
+    entry = data["mcpServers"]["github"]
+    assert entry["command"] == "npx"
+    assert entry["args"][:5] == [
+        "-y",
+        "harnis",
+        "mcp",
+        "--preset",
+        "github",
+    ]
+    assert entry["args"][-2:] == ["github-mcp-server", "stdio"]
+    backup = json.loads((tmp_path / "mcp.json.bak").read_text(encoding="utf-8"))
+    assert backup["mcpServers"]["github"]["command"] == "github-mcp-server"
+    assert scan_config(config) == []
+
+
+def test_apply_cli_rewrites_and_exits_0(tmp_path: Path, capsys):
+    config = tmp_path / "mcp.json"
+    _write(config, {"github": {"command": "github-mcp-server", "args": ["stdio"]}})
+
+    assert run(["scan", "--apply", str(config)]) == 0
+    output = capsys.readouterr().out
+    assert "delete_file" in output
+    assert "wrote" in output.casefold() or "wrapped" in output.casefold()
+    assert scan_config(config) == []
+    assert run(["scan", "--apply", str(config)]) == 0
+
+
+def test_quiet_scan_names_the_files_it_checked(tmp_path: Path, capsys):
+    config = tmp_path / "mcp.json"
+    _write(
+        config,
+        {
+            "filesystem": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"],
+            }
+        },
+    )
+
+    assert run(["scan", str(config)]) == 0
+    err = capsys.readouterr().err
+    assert "mcp.json" in err
+    assert "no writable catalog server" in err.casefold() or "nothing to wrap" in err.casefold()
