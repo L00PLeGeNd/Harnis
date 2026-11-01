@@ -63,6 +63,11 @@ def run(argv: list[str] | None = None) -> int:
         sys.stdout.write(USAGE)
         return 0
     command = args[0]
+    if command in {"version", "--version", "-V"}:
+        from harnis import __version__
+
+        sys.stdout.write(__version__ + "\n")
+        return 0
     if command == "init":
         return init_command(args[1:])
     if command == "status":
