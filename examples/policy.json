@@ -1,0 +1,7 @@
+{
+  "deny_path_parts": ["vault"],
+  "deny_file_names": ["token.txt"],
+  "allow_path_parts": ["fixtures"],
+  "empty_edit_limit": 5,
+  "max_tool_calls": 300
+}

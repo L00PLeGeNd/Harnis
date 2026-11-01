@@ -10,6 +10,8 @@ from pathlib import Path
 from harnis.runtime import BOOTSTRAP, looks_like_python
 
 USAGE = """\
+harnis init
+harnis status
 harnis scan
 harnis scan --apply
 harnis scan --json
@@ -18,19 +20,24 @@ harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
 harnis protect -- python agent.py
 harnis probe -- examples/leaky_agent.py
 harnis probe --transcript session.jsonl
+harnis hook
 
+init     Install Cursor hooks + .harnis/policy.json, then wrap catalog MCP servers.
+status   Show hooks, policy, and anything still unwrapped.
 scan     Read mcp.json. Name the dangerous tool and print a wrap, or --apply it.
 demo     Print one BLOCKED line for a GitHub delete_file. Nothing is executed.
 mcp      Judge tools/call, then forward the rest to an MCP stdio server.
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Judge tool calls the MCP proxy would refuse. A transcript is not executed.
+hook     Cursor agent hook: read one event from stdin, print permission JSON.
 
 Options:
   --apply             Rewrite bare catalog servers in mcp.json. Keep a .bak copy
+  --no-apply          init: install hooks/policy only
   --json              Print scan findings as JSON
-  --preset NAME       coding-agent (default), readonly, ci, github, postgres, or slack
+  --preset NAME       coding-agent (default), readonly, ci, github, postgres, slack, browser, or email
   --report PATH       HTML report
-  --policy PATH       JSON file adding deny_path_parts and deny_file_names
+  --policy PATH       JSON file: deny/allow paths, empty_edit_limit, max_tool_calls
   --url URL           Probe an HTTP agent instead of a local script
   --transcript PATH   Judge a recorded MCP JSONL session. Nothing is executed
   --scenario LIST     Comma list: credential,destructive,rag,escalation,exfil,all
@@ -56,6 +63,10 @@ def run(argv: list[str] | None = None) -> int:
         sys.stdout.write(USAGE)
         return 0
     command = args[0]
+    if command == "init":
+        return init_command(args[1:])
+    if command == "status":
+        return status_command(args[1:])
     if command == "scan":
         return scan_command(args[1:])
     if command == "demo":
@@ -66,14 +77,55 @@ def run(argv: list[str] | None = None) -> int:
         return protect(args[1:])
     if command == "probe":
         return probe_command(args[1:])
+    if command == "hook":
+        return hook_command(args[1:])
     sys.stderr.write(
-        "harnis: unknown command. Use: harnis scan [mcp.json]\n"
+        "harnis: unknown command. Use: harnis init\n"
+        "                         or: harnis status\n"
+        "                         or: harnis scan [mcp.json]\n"
         "                         or: harnis demo\n"
         "                         or: harnis mcp -- <server>\n"
         "                         or: harnis protect -- python agent.py\n"
         "                         or: harnis probe -- agent.py\n"
+        "                         or: harnis hook\n"
     )
     return 2
+
+
+def init_command(args: list[str]) -> int:
+    from harnis.project import format_init, init_project
+
+    if args and args[0] in {"-h", "--help"}:
+        sys.stdout.write(USAGE)
+        return 0
+    apply = True
+    for flag in args:
+        if flag == "--no-apply":
+            apply = False
+            continue
+        if flag == "--apply":
+            apply = True
+            continue
+        return _error("usage: harnis init [--apply|--no-apply]")
+    try:
+        report = init_project(apply=apply)
+    except (OSError, ValueError) as exc:
+        return _error(str(exc))
+    sys.stdout.write(format_init(report))
+    return 0
+
+
+def status_command(args: list[str]) -> int:
+    from harnis.project import format_status, status_report
+
+    if args and args[0] in {"-h", "--help"}:
+        sys.stdout.write(USAGE)
+        return 0
+    if args:
+        return _error("usage: harnis status")
+    report = status_report()
+    sys.stdout.write(format_status(report))
+    return 0 if report.ready else 1
 
 
 def scan_command(args: list[str]) -> int:
@@ -138,6 +190,39 @@ def scan_command(args: list[str]) -> int:
     return 0 if apply else 1
 
 
+def hook_command(args: list[str]) -> int:
+    import json
+
+    from harnis.hook import handle_hook
+    from harnis.policy import resolve_policy_path, rules_for
+
+    opts, rest, err = _flags(args, "--policy", "--preset")
+    if err == "help":
+        sys.stdout.write(USAGE)
+        return 0
+    if err:
+        return _error(err)
+    if rest:
+        return _error("usage: harnis hook [--policy PATH] [--preset NAME]")
+    try:
+        rules = rules_for(
+            opts.get("--preset", "coding-agent"),
+            resolve_policy_path(opts.get("--policy")),
+        )
+    except ValueError as exc:
+        return _error(str(exc))
+    raw = sys.stdin.read()
+    try:
+        event = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        return _error("hook stdin must be JSON")
+    if not isinstance(event, dict):
+        return _error("hook stdin must be a JSON object")
+    payload = handle_hook(event, rules)
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    return 0
+
+
 def demo_command(args: list[str]) -> int:
     if args and args[0] in {"-h", "--help"}:
         sys.stdout.write(USAGE)
@@ -158,7 +243,7 @@ def demo_command(args: list[str]) -> int:
 
 def mcp_command(args: list[str]) -> int:
     from harnis.mcp_proxy import proxy
-    from harnis.policy import rules_for
+    from harnis.policy import resolve_policy_path, rules_for
 
     opts, rest, err = _flags(args, "--report", "--policy", "--preset")
     if err == "help":
@@ -171,7 +256,7 @@ def mcp_command(args: list[str]) -> int:
     try:
         rules = rules_for(
             opts.get("--preset", "coding-agent"),
-            opts.get("--policy"),
+            resolve_policy_path(opts.get("--policy")),
         )
     except ValueError as exc:
         return _error(str(exc))
@@ -180,6 +265,8 @@ def mcp_command(args: list[str]) -> int:
 
 
 def protect(args: list[str]) -> int:
+    from harnis.policy import resolve_policy_path
+
     opts, rest, err = _flags(args, "--report", "--policy")
     if err == "help":
         sys.stdout.write(USAGE)
@@ -189,7 +276,8 @@ def protect(args: list[str]) -> int:
     if not rest:
         return _error("usage: harnis protect -- python agent.py")
     report = Path(opts.get("--report", "harnis-report.html")).resolve()
-    policy = Path(opts["--policy"]) if "--policy" in opts else None
+    resolved = resolve_policy_path(opts.get("--policy"))
+    policy = Path(resolved) if resolved else None
     if looks_like_python(rest[0]):
         if len(rest) < 2:
             return _error("python needs a script, -c, or -m")
@@ -215,12 +303,13 @@ def probe_command(args: list[str]) -> int:
     if err:
         return _error(err)
 
-    from harnis.policy import rules_for
+    from harnis.policy import resolve_policy_path, rules_for
     from harnis.probe import probe_script, probe_transcript, probe_url
     from harnis.report import emit_finding
 
     report = Path(opts.get("--report", "harnis-probe.html")).resolve()
-    policy = Path(opts["--policy"]) if "--policy" in opts else None
+    resolved = resolve_policy_path(opts.get("--policy"))
+    policy = Path(resolved) if resolved else None
     preset = opts.get("--preset", "coding-agent")
     url = opts.get("--url")
     transcript = Path(opts["--transcript"]) if "--transcript" in opts else None

@@ -12,13 +12,18 @@ import sys
 import threading
 from pathlib import Path
 
+from harnis.budget import EditBudget
 from harnis.policy import Decision, Rules, judge_tool_call
 from harnis.report import Session, emit
 
 
-def handle_client_message(message: dict, rules: Rules | None = None) -> dict | None:
+def handle_client_message(
+    message: dict,
+    rules: Rules | None = None,
+    budget: EditBudget | None = None,
+) -> dict | None:
     """Return a JSON-RPC response when the call must stop here."""
-    decision = decision_for_message(message, rules)
+    decision = decision_for_message(message, rules, budget)
     if decision is None or decision.allowed:
         return None
     return {
@@ -31,7 +36,11 @@ def handle_client_message(message: dict, rules: Rules | None = None) -> dict | N
     }
 
 
-def decision_for_message(message: dict, rules: Rules | None = None) -> Decision | None:
+def decision_for_message(
+    message: dict,
+    rules: Rules | None = None,
+    budget: EditBudget | None = None,
+) -> Decision | None:
     if not isinstance(message, dict) or message.get("method") != "tools/call":
         return None
     params = message.get("params") or {}
@@ -39,12 +48,19 @@ def decision_for_message(message: dict, rules: Rules | None = None) -> Decision 
         return None
     name = str(params.get("name") or "")
     arguments = _arguments(params.get("arguments"))
-    return judge_tool_call(name, arguments, rules)
+    decision = judge_tool_call(name, arguments, rules)
+    if not decision.allowed:
+        return decision
+    if budget is None:
+        return decision
+    thrash = budget.judge(name, arguments)
+    return thrash if thrash is not None else decision
 
 
 def proxy(command: list[str], rules: Rules, report: Path) -> int:
     """Sit between this process's stdin/stdout and the server command."""
     session = Session(report)
+    budget = EditBudget.from_rules(rules)
     server = subprocess.Popen(
         command,
         stdin=subprocess.PIPE,
@@ -56,7 +72,7 @@ def proxy(command: list[str], rules: Rules, report: Path) -> int:
     pump.start()
     try:
         for raw in iter(sys.stdin.buffer.readline, b""):
-            _forward_or_block(raw, server, rules, session)
+            _forward_or_block(raw, server, rules, session, budget)
     finally:
         _close_stdin(server)
         pump.join(timeout=15)
@@ -66,9 +82,15 @@ def proxy(command: list[str], rules: Rules, report: Path) -> int:
     return code
 
 
-def _forward_or_block(raw: bytes, server: subprocess.Popen, rules: Rules, session: Session) -> None:
+def _forward_or_block(
+    raw: bytes,
+    server: subprocess.Popen,
+    rules: Rules,
+    session: Session,
+    budget: EditBudget,
+) -> None:
     message = _parse(raw)
-    decision = decision_for_message(message, rules) if message is not None else None
+    decision = decision_for_message(message, rules, budget) if message is not None else None
     if decision is None or decision.allowed:
         assert server.stdin is not None
         server.stdin.write(raw if raw.endswith(b"\n") else raw + b"\n")

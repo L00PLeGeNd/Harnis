@@ -328,6 +328,30 @@ def test_extra_github_and_postgres_package_names_are_seen(tmp_path: Path):
     assert findings["db"].preset == "postgres"
 
 
+def test_browser_and_email_package_names_are_seen(tmp_path: Path):
+    config = tmp_path / "mcp.json"
+    _write(
+        config,
+        {
+            "web": {
+                "command": "npx",
+                "args": ["-y", "@playwright/mcp"],
+            },
+            "mail": {
+                "command": "npx",
+                "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
+            },
+        },
+    )
+
+    findings = {item.server: item for item in scan_config(config)}
+
+    assert findings["web"].preset == "browser"
+    assert findings["web"].tool == "browser_evaluate"
+    assert findings["mail"].preset == "email"
+    assert findings["mail"].tool == "send_email"
+
+
 def test_windsurf_cline_and_continue_configs_are_scanned(
     tmp_path: Path, monkeypatch
 ):

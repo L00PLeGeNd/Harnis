@@ -7,6 +7,7 @@ audit hook or a ptrace stop should be able to judge and return.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 from dataclasses import dataclass
@@ -137,6 +138,32 @@ class Rules:
     deny_file_names: frozenset[str] = frozenset()
     allow_path_parts: frozenset[str] = frozenset()
     preset: str = "coding-agent"
+    empty_edit_limit: int = 5
+    max_tool_calls: int | None = None
+
+
+def discover_policy(root: Path | None = None) -> Path | None:
+    """Return `.harnis/policy.json` (or sibling names) under root/cwd when present."""
+    base = Path.cwd() if root is None else Path(root)
+    for candidate in (
+        base / ".harnis" / "policy.json",
+        base / "harnis.policy.json",
+        base / "policy.harnis.json",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_policy_path(path: str | None = None, root: Path | None = None) -> str | None:
+    """Explicit path wins, then HARNIS_POLICY, then a project policy file."""
+    if path:
+        return path
+    env = os.environ.get("HARNIS_POLICY")
+    if env:
+        return env
+    found = discover_policy(root)
+    return str(found) if found is not None else None
 
 
 def load_rules(path: str | None) -> Rules:
@@ -153,10 +180,25 @@ def load_rules(path: str | None) -> Rules:
         deny_path_parts=_string_set(data.get("deny_path_parts", []), "deny_path_parts"),
         deny_file_names=_string_set(data.get("deny_file_names", []), "deny_file_names"),
         allow_path_parts=_string_set(data.get("allow_path_parts", []), "allow_path_parts"),
+        empty_edit_limit=_optional_positive_int(
+            data.get("empty_edit_limit", 5), "empty_edit_limit", default=5
+        ),
+        max_tool_calls=_optional_positive_int(
+            data.get("max_tool_calls"), "max_tool_calls", default=None
+        ),
     )
 
 
-PRESETS = frozenset({"coding-agent", "readonly", "ci", "github", "postgres", "slack"})
+PRESETS = frozenset({
+    "coding-agent",
+    "readonly",
+    "ci",
+    "github",
+    "postgres",
+    "slack",
+    "browser",
+    "email",
+})
 _DEFAULT_BRANCHES = frozenset({"main", "master"})
 _READ_SQL = frozenset({"select", "with", "explain", "show"})
 _WRITE_SQL = frozenset({"drop", "truncate", "delete"})
@@ -175,6 +217,8 @@ def rules_for(preset: str, path: str | None = None) -> Rules:
         deny_file_names=loaded.deny_file_names,
         allow_path_parts=loaded.allow_path_parts,
         preset=preset,
+        empty_edit_limit=loaded.empty_edit_limit,
+        max_tool_calls=loaded.max_tool_calls,
     )
 
 
@@ -182,6 +226,14 @@ def _string_set(value, field: str) -> frozenset[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must be a list of strings")
     return frozenset(item.casefold() for item in value if item)
+
+
+def _optional_positive_int(value, field: str, default: int | None) -> int | None:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{field} must be a positive integer")
+    return value
 
 
 def judge(action: Action, rules: Rules | None = None) -> Decision:
@@ -575,6 +627,10 @@ def _server_preset(name: str, arguments: dict, rules: Rules) -> Decision | None:
         return _postgres_preset(name, arguments)
     if rules.preset == "slack":
         return _slack_preset(arguments, name)
+    if rules.preset == "browser":
+        return _browser_preset(name, arguments)
+    if rules.preset == "email":
+        return _email_preset(name)
     return None
 
 
@@ -648,6 +704,49 @@ def _slack_preset(arguments: dict, name: str) -> Decision | None:
         value = arguments.get(key)
         if isinstance(value, str) and carries_secret(value.encode("utf-8"), ()):
             return Decision(False, "no-secret-exfil", "send secrets in a Slack message")
+    return None
+
+
+_BROWSER_EVAL = frozenset({
+    "browser_evaluate",
+    "evaluate",
+    "evaluate_script",
+    "run_js",
+    "execute_javascript",
+    "puppeteer_evaluate",
+})
+_BROWSER_NAV = frozenset({
+    "browser_navigate",
+    "navigate",
+    "goto",
+    "puppeteer_navigate",
+    "playwright_navigate",
+})
+
+
+def _browser_preset(name: str, arguments: dict) -> Decision | None:
+    if name in _BROWSER_EVAL:
+        return Decision(False, "browser-evaluate", "run page JavaScript")
+    if name in _BROWSER_NAV:
+        url = str(arguments.get("url") or arguments.get("uri") or "")
+        if url.casefold().startswith("file:"):
+            return Decision(False, "browser-local-file", "open a local file URL in the browser")
+    return None
+
+
+_EMAIL_SEND = frozenset({
+    "send_email",
+    "send_message",
+    "send_mail",
+    "create_draft",
+    "gmail_send",
+    "draft_send",
+})
+
+
+def _email_preset(name: str) -> Decision | None:
+    if name in _EMAIL_SEND:
+        return Decision(False, "email-send", "send email")
     return None
 
 

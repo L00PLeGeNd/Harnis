@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harnis"
-version = "0.6.0"
-description = "Stdio proxy that blocks dangerous MCP tool calls before the server runs them."
+version = "0.7.0"
+description = "Init once: Cursor hooks, edit budgets, and MCP wraps that block dangerous agent tool calls."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

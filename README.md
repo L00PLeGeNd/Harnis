@@ -4,16 +4,21 @@
 [![CI](https://github.com/L00PLeGeNd/Harnis/actions/workflows/ci.yml/badge.svg)](https://github.com/L00PLeGeNd/Harnis/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Stdio proxy for MCP. Reads the `mcp.json` you already have, names the tool that can hurt you, and wraps that server before it runs.
+Install once. Stay protected while the agent works.
 
 ```bash
-npx -y harnis scan --apply
+npx -y harnis init
+npx -y harnis status
 ```
 
 ```text
-github can call delete_file.
+hooks: wrote (.cursor/hooks.json)
+policy: wrote (.harnis/policy.json)
 wrapped github in .cursor/mcp.json
+next: npx -y harnis status
 ```
+
+`init` wires Cursor hooks, drops a project policy (edit thrash + tool-call budget), and wraps dangerous MCP servers behind Harnis. `status` is the daily check: hooks, policy, anything still bare.
 
 ```bash
 npx -y harnis demo
@@ -23,12 +28,11 @@ npx -y harnis demo
 🚨 BLOCKED: agent attempted to delete a file on GitHub (policy: github-delete)
 ```
 
-Python 3.11+. Filesystem servers stay alone. `--apply` keeps `mcp.json.bak`. `--json` prints findings for scripts. Without `--apply`, scan exits 1 for CI.
-
-Scans Cursor, VS Code, Claude Desktop, Windsurf, Continue, Cline, and Roo. Continue's `mcpServers` array shape is supported. URL-only MCP servers are reported but not wrapped.
+Python 3.11+. Filesystem servers stay alone. `scan --apply` still works alone; `--json` is for scripts. Scans Cursor, VS Code, Claude Desktop, Windsurf, Continue, Cline, and Roo. URL-only MCP servers are reported but not wrapped.
 
 ```yaml
 - uses: L00PLeGeNd/Harnis/.github/actions/scan@main
+- uses: L00PLeGeNd/Harnis/.github/actions/status@main
 ```
 
 ---
@@ -36,6 +40,10 @@ Scans Cursor, VS Code, Claude Desktop, Windsurf, Continue, Cline, and Roo. Conti
 ## Proxy
 
 Judges `tools/call` before the server sees it. A denial never reaches the server — the client gets a tool error, the terminal prints one line, and `harnis-mcp.html` records it. `initialize` and `tools/list` pass through.
+
+Within one proxy session, near-identical rewrites of the same file (including whitespace-only churn) are denied after five hits (`no-edit-thrash`). Set `empty_edit_limit` and optional `max_tool_calls` in the policy file to tune the session budget.
+
+`harnis init` writes `.cursor/hooks.json` for you (`beforeShellExecution`, `beforeMCPExecution`, `preToolUse`). Session budget state lives under the temp dir, keyed by `conversation_id`. Project policy is auto-loaded from `.harnis/policy.json` (or `HARNIS_POLICY`).
 
 ```bash
 npx -y harnis mcp --preset github -- github-mcp-server stdio
@@ -50,6 +58,8 @@ npx -y harnis mcp --preset github -- github-mcp-server stdio
 | `github` | File and issue reads, feature-branch writes, `merge_pull_request` | `delete_file`, `delete_repository`; writes to `main` / `master` / omitted branch |
 | `postgres` | `SELECT` / `WITH` / `EXPLAIN` / `SHOW` | `postgres_mcp_modify` / `modify`; mutating SQL via `query` / `execute_sql` / … |
 | `slack` | Ordinary posts | Posts (`slack_post_message`, `chat_postMessage`, …) that carry a key or token |
+| `browser` | Clicks, screenshots, `https` navigation | `browser_evaluate` / page JS; `file://` navigation |
+| `email` | List / read mail | `send_email`, `create_draft`, and other send tools |
 | `coding-agent` | Workspace read and write | Credential paths, `rm -rf`, unbounded / opaque shell, secret bodies |
 | `readonly` | Non-credential reads | Writes, shell, outbound sends |
 | `ci` | Same file rules as coding-agent | Every shell call |
@@ -75,7 +85,9 @@ On a filesystem server, `list_directory`, `directory_tree`, `search_files`, and 
 {
   "deny_path_parts": ["vault"],
   "deny_file_names": ["token.txt"],
-  "allow_path_parts": ["fixtures"]
+  "allow_path_parts": ["fixtures"],
+  "empty_edit_limit": 5,
+  "max_tool_calls": 200
 }
 ```
 

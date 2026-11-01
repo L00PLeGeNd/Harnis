@@ -16,6 +16,13 @@ _PACKAGES: tuple[tuple[str, str, str], ...] = (
     ("@crystaldba/postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("@modelcontextprotocol/server-slack", "slack", "slack_post_message"),
+    ("@modelcontextprotocol/server-puppeteer", "browser", "browser_evaluate"),
+    ("@playwright/mcp", "browser", "browser_evaluate"),
+    ("playwright-mcp", "browser", "browser_evaluate"),
+    ("@executeautomation/playwright-mcp-server", "browser", "browser_evaluate"),
+    ("@gongrzhe/server-gmail-autoauth-mcp", "email", "send_email"),
+    ("@l404biol/gmail-mcp", "email", "send_email"),
+    ("gmail-mcp", "email", "send_email"),
 )
 _SHELLS = frozenset(
     name

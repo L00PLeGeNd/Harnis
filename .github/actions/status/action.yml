@@ -1,0 +1,11 @@
+name: Harnis status
+description: Fail when project hooks, policy, or MCP wraps are missing
+runs:
+  using: composite
+  steps:
+    - name: Install Harnis
+      shell: bash
+      run: python -m pip install "harnis @ git+https://github.com/L00PLeGeNd/Harnis.git"
+    - name: Check posture
+      shell: bash
+      run: python -m harnis status

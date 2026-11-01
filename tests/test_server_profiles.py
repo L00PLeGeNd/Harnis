@@ -105,3 +105,53 @@ def test_postgres_preset_accepts_execute_sql_alias():
     drop = judge_tool_call("execute_sql", {"query": "DROP TABLE t"}, rules)
     assert select.allowed
     assert drop.allowed is False
+
+
+def test_browser_preset_blocks_evaluate_and_file_urls():
+    rules = rules_for("browser")
+
+    click = judge_tool_call("browser_click", {"element": "Submit"}, rules)
+    evaluate = judge_tool_call(
+        "browser_evaluate",
+        {"function": "() => document.cookie"},
+        rules,
+    )
+    file_url = judge_tool_call(
+        "browser_navigate",
+        {"url": "file:///etc/passwd"},
+        rules,
+    )
+    https = judge_tool_call(
+        "browser_navigate",
+        {"url": "https://example.com"},
+        rules,
+    )
+
+    assert click.allowed
+    assert evaluate.allowed is False
+    assert evaluate.policy == "browser-evaluate"
+    assert file_url.allowed is False
+    assert file_url.policy == "browser-local-file"
+    assert https.allowed
+
+
+def test_email_preset_blocks_send_and_allows_read():
+    rules = rules_for("email")
+
+    listed = judge_tool_call("list_emails", {"maxResults": 5}, rules)
+    sent = judge_tool_call(
+        "send_email",
+        {"to": "a@example.com", "subject": "hi", "body": "hello"},
+        rules,
+    )
+    draft = judge_tool_call(
+        "create_draft",
+        {"to": "a@example.com", "body": "hello"},
+        rules,
+    )
+
+    assert listed.allowed
+    assert sent.allowed is False
+    assert sent.policy == "email-send"
+    assert draft.allowed is False
+    assert draft.policy == "email-send"
