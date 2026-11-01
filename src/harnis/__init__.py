@@ -3,7 +3,7 @@
 from harnis.policy import Action, Decision, Rules, judge, judge_tool_call, load_rules, rules_for
 from harnis.probe import Finding, HttpAgent, ProbeTarget, Turn, probe, scenario_pack
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "Action",

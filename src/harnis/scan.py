@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 _PACKAGES: tuple[tuple[str, str, str], ...] = (
     ("github-mcp-server", "github", "delete_file"),
     ("@modelcontextprotocol/server-github", "github", "delete_file"),
+    ("@github/github-mcp-server", "github", "delete_file"),
     ("@microsoft/postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("@modelcontextprotocol/server-postgres", "postgres", "postgres_mcp_modify"),
+    ("@crystaldba/postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("@modelcontextprotocol/server-slack", "slack", "slack_post_message"),
 )
@@ -73,12 +76,34 @@ def apply_wraps(path: Path | None = None) -> list[ConfigFinding]:
 
 
 def _default_files() -> list[Path]:
+    home = Path.home()
     candidates = [
         Path(".cursor/mcp.json"),
         Path(".vscode/mcp.json"),
-        Path.home() / ".cursor" / "mcp.json",
+        home / ".cursor" / "mcp.json",
+        *_claude_desktop_files(home),
     ]
-    return [path for path in candidates if path.is_file()]
+    seen: set[Path] = set()
+    found: list[Path] = []
+    for path in candidates:
+        resolved = path.resolve() if path.is_file() else path
+        if not path.is_file() or resolved in seen:
+            continue
+        seen.add(resolved)
+        found.append(path)
+    return found
+
+
+def _claude_desktop_files(home: Path) -> list[Path]:
+    name = "claude_desktop_config.json"
+    paths = [
+        home / "Library" / "Application Support" / "Claude" / name,
+        home / ".config" / "Claude" / name,
+    ]
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        paths.insert(0, Path(appdata) / "Claude" / name)
+    return paths
 
 
 def _scan_file(file: Path) -> list[ConfigFinding]:

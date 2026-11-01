@@ -80,7 +80,28 @@ def test_slack_preset_blocks_a_post_that_carries_a_token():
 
     hello = judge_tool_call("slack_post_message", {"text": "hello"}, rules)
     leaked = judge_tool_call("slack_post_message", {"text": token}, rules)
+    chat = judge_tool_call("chat_postMessage", {"text": token}, rules)
 
     assert hello.allowed
     assert leaked.allowed is False
     assert leaked.policy == "no-secret-exfil"
+    assert chat.allowed is False
+
+
+def test_github_preset_blocks_deleting_a_repository():
+    rules = rules_for("github")
+    decision = judge_tool_call(
+        "delete_repository",
+        {"owner": "acme", "repo": "app"},
+        rules,
+    )
+    assert decision.allowed is False
+    assert decision.policy == "github-delete"
+
+
+def test_postgres_preset_accepts_execute_sql_alias():
+    rules = rules_for("postgres")
+    select = judge_tool_call("execute_sql", {"query": "SELECT 1"}, rules)
+    drop = judge_tool_call("execute_sql", {"query": "DROP TABLE t"}, rules)
+    assert select.allowed
+    assert drop.allowed is False

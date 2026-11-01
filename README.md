@@ -15,7 +15,17 @@ github can call delete_file.
 wrapped github in .cursor/mcp.json
 ```
 
-Python 3.11+. Filesystem servers stay alone. `--apply` keeps `mcp.json.bak`. Without it, scan prints the paste block and exits 1 for CI.
+```bash
+npx -y harnis demo
+```
+
+```text
+🚨 BLOCKED: agent attempted to delete a file on GitHub (policy: github-delete)
+```
+
+Python 3.11+. Filesystem servers stay alone. `--apply` keeps `mcp.json.bak`. `--json` prints findings for scripts. Without `--apply`, scan exits 1 for CI.
+
+Default paths: `.cursor/mcp.json`, `.vscode/mcp.json`, `~/.cursor/mcp.json`, and Claude Desktop's `claude_desktop_config.json`.
 
 ```yaml
 - uses: L00PLeGeNd/Harnis/.github/actions/scan@main
@@ -37,9 +47,9 @@ npx -y harnis mcp --preset github -- github-mcp-server stdio
 
 | Preset | Allows | Denies |
 | --- | --- | --- |
-| `github` | File and issue reads, feature-branch writes, `merge_pull_request` | `delete_file`; writes to `main` / `master` / omitted branch |
-| `postgres` | `SELECT` / `WITH` / `EXPLAIN` / `SHOW` | `postgres_mcp_modify`, `DROP`, `TRUNCATE`, `DELETE` |
-| `slack` | Ordinary posts | Posts that carry a key or token |
+| `github` | File and issue reads, feature-branch writes, `merge_pull_request` | `delete_file`, `delete_repository`; writes to `main` / `master` / omitted branch |
+| `postgres` | `SELECT` / `WITH` / `EXPLAIN` / `SHOW` | `postgres_mcp_modify` / `modify`; mutating SQL via `query` / `execute_sql` / … |
+| `slack` | Ordinary posts | Posts (`slack_post_message`, `chat_postMessage`, …) that carry a key or token |
 | `coding-agent` | Workspace read and write | Credential paths, `rm -rf`, unbounded / opaque shell, secret bodies |
 | `readonly` | Non-credential reads | Writes, shell, outbound sends |
 | `ci` | Same file rules as coding-agent | Every shell call |

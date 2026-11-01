@@ -579,8 +579,9 @@ def _server_preset(name: str, arguments: dict, rules: Rules) -> Decision | None:
 
 
 def _github_preset(name: str, arguments: dict) -> Decision | None:
-    if name == "delete_file":
-        return Decision(False, "github-delete", "delete a file on GitHub")
+    if name in {"delete_file", "delete_repository"}:
+        target = "a repository on GitHub" if name == "delete_repository" else "a file on GitHub"
+        return Decision(False, "github-delete", f"delete {target}")
     if name in {"push_files", "create_or_update_file"} and _on_default_branch(arguments):
         return Decision(False, "github-default-branch", "write the default branch on GitHub")
     return None
@@ -593,10 +594,20 @@ def _on_default_branch(arguments: dict) -> bool:
     return str(branch).casefold() in _DEFAULT_BRANCHES
 
 
+_POSTGRES_WRITE = frozenset({"postgres_mcp_modify", "modify"})
+_POSTGRES_QUERY = frozenset({
+    "postgres_mcp_query",
+    "query",
+    "execute_sql",
+    "run_query",
+    "execute",
+})
+
+
 def _postgres_preset(name: str, arguments: dict) -> Decision | None:
-    if name == "postgres_mcp_modify":
+    if name in _POSTGRES_WRITE:
         return Decision(False, "postgres-modify", "modify the database")
-    if name in {"postgres_mcp_query", "query"} and not _sql_is_read(_sql_text(arguments)):
+    if name in _POSTGRES_QUERY and not _sql_is_read(_sql_text(arguments)):
         return Decision(False, "postgres-modify", "modify the database")
     return None
 
@@ -622,8 +633,16 @@ def _sql_words(sql: str) -> list[str]:
     return re.findall(r"[a-z_]+", without_comments.casefold())
 
 
+_SLACK_POST = frozenset({
+    "slack_post_message",
+    "post_message",
+    "chat_postmessage",
+    "conversations_add_message",
+})
+
+
 def _slack_preset(arguments: dict, name: str) -> Decision | None:
-    if name not in {"slack_post_message", "post_message"}:
+    if name not in _SLACK_POST:
         return None
     for key in ("text", "message", "content"):
         value = arguments.get(key)

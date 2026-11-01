@@ -1,6 +1,7 @@
 """harnis scan reads an existing mcp.json and asks for a wrap."""
 
 import json
+import sys
 from pathlib import Path
 
 from harnis.cli import run
@@ -275,3 +276,53 @@ def test_quiet_scan_names_the_files_it_checked(tmp_path: Path, capsys):
     err = capsys.readouterr().err
     assert "mcp.json" in err
     assert "no writable catalog server" in err.casefold() or "nothing to wrap" in err.casefold()
+
+
+def test_scan_json_prints_findings_as_json(tmp_path: Path, capsys):
+    config = tmp_path / "mcp.json"
+    _write(config, {"github": {"command": "github-mcp-server", "args": ["stdio"]}})
+
+    assert run(["scan", "--json", str(config)]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["server"] == "github"
+    assert payload[0]["tool"] == "delete_file"
+    assert payload[0]["snippet"]["args"][1] == "harnis"
+
+
+def test_claude_desktop_config_is_scanned_by_default(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    if sys.platform == "win32":
+        monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+        config = tmp_path / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json"
+    else:
+        config = tmp_path / "home" / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    config.parent.mkdir(parents=True)
+    _write(config, {"github": {"command": "github-mcp-server", "args": ["stdio"]}})
+
+    findings = scan_config(None)
+
+    assert len(findings) == 1
+    assert findings[0].preset == "github"
+
+
+def test_extra_github_and_postgres_package_names_are_seen(tmp_path: Path):
+    config = tmp_path / "mcp.json"
+    _write(
+        config,
+        {
+            "gh": {
+                "command": "npx",
+                "args": ["-y", "@github/github-mcp-server"],
+            },
+            "db": {
+                "command": "npx",
+                "args": ["-y", "@crystaldba/postgres-mcp"],
+            },
+        },
+    )
+
+    findings = {item.server: item for item in scan_config(config)}
+
+    assert findings["gh"].preset == "github"
+    assert findings["db"].preset == "postgres"

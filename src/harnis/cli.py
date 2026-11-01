@@ -12,18 +12,22 @@ from harnis.runtime import BOOTSTRAP, looks_like_python
 USAGE = """\
 harnis scan
 harnis scan --apply
+harnis scan --json
+harnis demo
 harnis mcp -- npx -y @modelcontextprotocol/server-filesystem /work
 harnis protect -- python agent.py
 harnis probe -- examples/leaky_agent.py
 harnis probe --transcript session.jsonl
 
 scan     Read mcp.json. Name the dangerous tool and print a wrap, or --apply it.
+demo     Print one BLOCKED line for a GitHub delete_file. Nothing is executed.
 mcp      Judge tools/call, then forward the rest to an MCP stdio server.
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Judge tool calls the MCP proxy would refuse. A transcript is not executed.
 
 Options:
   --apply             Rewrite bare catalog servers in mcp.json. Keep a .bak copy
+  --json              Print scan findings as JSON
   --preset NAME       coding-agent (default), readonly, ci, github, postgres, or slack
   --report PATH       HTML report
   --policy PATH       JSON file adding deny_path_parts and deny_file_names
@@ -54,6 +58,8 @@ def run(argv: list[str] | None = None) -> int:
     command = args[0]
     if command == "scan":
         return scan_command(args[1:])
+    if command == "demo":
+        return demo_command(args[1:])
     if command == "mcp":
         return mcp_command(args[1:])
     if command == "protect":
@@ -62,6 +68,7 @@ def run(argv: list[str] | None = None) -> int:
         return probe_command(args[1:])
     sys.stderr.write(
         "harnis: unknown command. Use: harnis scan [mcp.json]\n"
+        "                         or: harnis demo\n"
         "                         or: harnis mcp -- <server>\n"
         "                         or: harnis protect -- python agent.py\n"
         "                         or: harnis probe -- agent.py\n"
@@ -78,19 +85,28 @@ def scan_command(args: list[str]) -> int:
         sys.stdout.write(USAGE)
         return 0
     apply = False
+    as_json = False
     path: Path | None = None
     for flag in args:
         if flag == "--apply":
             apply = True
             continue
+        if flag == "--json":
+            as_json = True
+            continue
         if path is not None:
-            return _error("usage: harnis scan [--apply] [mcp.json]")
+            return _error("usage: harnis scan [--apply] [--json] [mcp.json]")
         path = Path(flag)
+    if apply and as_json:
+        return _error("use --apply or --json, not both")
     try:
         findings = apply_wraps(path) if apply else scan_config(path)
     except (OSError, ValueError) as exc:
         return _error(str(exc))
     if not findings:
+        if as_json:
+            sys.stdout.write("[]\n")
+            return 0
         files = scan_files(path)
         if not files or (path is not None and not path.is_file()):
             sys.stderr.write("harnis: no mcp.json found\n")
@@ -98,6 +114,19 @@ def scan_command(args: list[str]) -> int:
             listed = ", ".join(str(file) for file in files)
             sys.stderr.write(f"harnis: scanned {listed}; nothing to wrap\n")
         return 0
+    if as_json:
+        payload = [
+            {
+                "server": finding.server,
+                "preset": finding.preset,
+                "tool": finding.tool,
+                "path": str(finding.path) if finding.path else None,
+                "snippet": finding.snippet,
+            }
+            for finding in findings
+        ]
+        sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        return 1
     for finding in findings:
         sys.stdout.write(finding.sentence() + "\n")
         if apply and finding.path is not None:
@@ -105,6 +134,24 @@ def scan_command(args: list[str]) -> int:
         else:
             sys.stdout.write(json.dumps(finding.snippet, indent=2) + "\n")
     return 0 if apply else 1
+
+
+def demo_command(args: list[str]) -> int:
+    if args and args[0] in {"-h", "--help"}:
+        sys.stdout.write(USAGE)
+        return 0
+    if args:
+        return _error("usage: harnis demo")
+    from harnis.policy import judge_tool_call, rules_for
+    from harnis.report import emit
+
+    decision = judge_tool_call(
+        "delete_file",
+        {"owner": "acme", "repo": "app", "path": "secret.env", "branch": "main"},
+        rules_for("github"),
+    )
+    emit(decision)
+    return 0 if decision.allowed else 1
 
 
 def mcp_command(args: list[str]) -> int:
