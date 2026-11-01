@@ -120,6 +120,8 @@ def scan_command(args: list[str]) -> int:
                 "server": finding.server,
                 "preset": finding.preset,
                 "tool": finding.tool,
+                "client": finding.client,
+                "wrapable": finding.wrapable,
                 "path": str(finding.path) if finding.path else None,
                 "snippet": finding.snippet,
             }
@@ -131,7 +133,7 @@ def scan_command(args: list[str]) -> int:
         sys.stdout.write(finding.sentence() + "\n")
         if apply and finding.path is not None:
             sys.stdout.write(f"wrapped {finding.server} in {finding.path}\n")
-        else:
+        elif finding.wrapable:
             sys.stdout.write(json.dumps(finding.snippet, indent=2) + "\n")
     return 0 if apply else 1
 

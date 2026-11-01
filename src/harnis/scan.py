@@ -1,4 +1,4 @@
-"""Find MCP servers in a client config that should sit behind Harnis."""
+"""Find MCP servers in client configs that should sit behind Harnis."""
 
 from __future__ import annotations
 
@@ -34,8 +34,12 @@ class ConfigFinding:
     tool: str
     snippet: dict
     path: Path | None = None
+    client: str = "config"
+    wrapable: bool = True
 
     def sentence(self) -> str:
+        if not self.wrapable:
+            return f"{self.server} is a remote MCP URL; Harnis cannot wrap it."
         return f"{self.server} can call {self.tool}."
 
 
@@ -43,18 +47,30 @@ def scan_files(path: Path | None = None) -> list[Path]:
     """Config files a scan would read. Missing explicit paths are still listed."""
     if path is not None:
         return [Path(path)]
-    return _default_files()
+    return [file for _client, file in _default_targets()]
 
 
 def scan_config(path: Path | None = None) -> list[ConfigFinding]:
-    """Return one finding per catalog server that is not wrapped with its preset."""
+    """Return findings for catalog servers and remote URL servers."""
     findings: list[ConfigFinding] = []
     seen: set[str] = set()
-    for file in scan_files(path):
+    targets = [(None, Path(path))] if path is not None else _default_targets()
+    for client, file in targets:
         if path is not None and not file.is_file():
             continue
-        for finding in _scan_file(file):
-            key = json.dumps(finding.snippet, sort_keys=True, ensure_ascii=False)
+        label = client or "config"
+        for finding in _scan_file(file, label):
+            key = json.dumps(
+                {
+                    "client": finding.client,
+                    "server": finding.server,
+                    "wrapable": finding.wrapable,
+                    "snippet": finding.snippet,
+                    "path": str(finding.path) if finding.path else None,
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            )
             if key in seen:
                 continue
             seen.add(key)
@@ -66,8 +82,9 @@ def apply_wraps(path: Path | None = None) -> list[ConfigFinding]:
     """Rewrite bare catalog servers in place. Keep a .bak next to each changed file."""
     by_file: dict[Path, list[ConfigFinding]] = {}
     for finding in scan_config(path):
-        if finding.path is not None:
-            by_file.setdefault(finding.path, []).append(finding)
+        if finding.path is None or not finding.wrapable:
+            continue
+        by_file.setdefault(finding.path, []).append(finding)
     applied: list[ConfigFinding] = []
     for file, findings in by_file.items():
         _apply_file(file, findings)
@@ -75,46 +92,139 @@ def apply_wraps(path: Path | None = None) -> list[ConfigFinding]:
     return applied
 
 
-def _default_files() -> list[Path]:
+def _default_targets() -> list[tuple[str, Path]]:
     home = Path.home()
-    candidates = [
-        Path(".cursor/mcp.json"),
-        Path(".vscode/mcp.json"),
-        home / ".cursor" / "mcp.json",
-        *_claude_desktop_files(home),
+    appdata = os.environ.get("APPDATA")
+    candidates: list[tuple[str, Path]] = [
+        ("cursor", Path(".cursor/mcp.json")),
+        ("vscode", Path(".vscode/mcp.json")),
+        ("cursor", home / ".cursor" / "mcp.json"),
+        ("windsurf", home / ".codeium" / "windsurf" / "mcp_config.json"),
+        ("continue", home / ".continue" / "config.json"),
+        ("cline", home / ".cline" / "data" / "settings" / "cline_mcp_settings.json"),
+        ("cline", home / ".cline" / "mcp.json"),
+        ("claude-desktop", home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"),
+        ("claude-desktop", home / ".config" / "Claude" / "claude_desktop_config.json"),
     ]
+    if appdata:
+        base = Path(appdata)
+        candidates.extend(
+            [
+                ("claude-desktop", base / "Claude" / "claude_desktop_config.json"),
+                (
+                    "cline",
+                    base
+                    / "Code"
+                    / "User"
+                    / "globalStorage"
+                    / "saoudrizwan.claude-dev"
+                    / "settings"
+                    / "cline_mcp_settings.json",
+                ),
+                (
+                    "cline",
+                    base
+                    / "Code - Insiders"
+                    / "User"
+                    / "globalStorage"
+                    / "saoudrizwan.claude-dev"
+                    / "settings"
+                    / "cline_mcp_settings.json",
+                ),
+                (
+                    "cline",
+                    base
+                    / "Cursor"
+                    / "User"
+                    / "globalStorage"
+                    / "saoudrizwan.claude-dev"
+                    / "settings"
+                    / "cline_mcp_settings.json",
+                ),
+                (
+                    "roo",
+                    base
+                    / "Code"
+                    / "User"
+                    / "globalStorage"
+                    / "rooveterinaryinc.roo-cline"
+                    / "settings"
+                    / "mcp_settings.json",
+                ),
+                (
+                    "roo",
+                    base
+                    / "Cursor"
+                    / "User"
+                    / "globalStorage"
+                    / "rooveterinaryinc.roo-cline"
+                    / "settings"
+                    / "mcp_settings.json",
+                ),
+            ]
+        )
+    else:
+        config = home / ".config"
+        candidates.extend(
+            [
+                (
+                    "cline",
+                    config
+                    / "Code"
+                    / "User"
+                    / "globalStorage"
+                    / "saoudrizwan.claude-dev"
+                    / "settings"
+                    / "cline_mcp_settings.json",
+                ),
+                (
+                    "roo",
+                    config
+                    / "Code"
+                    / "User"
+                    / "globalStorage"
+                    / "rooveterinaryinc.roo-cline"
+                    / "settings"
+                    / "mcp_settings.json",
+                ),
+            ]
+        )
+
     seen: set[Path] = set()
-    found: list[Path] = []
-    for path in candidates:
-        resolved = path.resolve() if path.is_file() else path
-        if not path.is_file() or resolved in seen:
+    found: list[tuple[str, Path]] = []
+    for client, path in candidates:
+        if not path.is_file():
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
             continue
         seen.add(resolved)
-        found.append(path)
+        found.append((client, path))
     return found
 
 
-def _claude_desktop_files(home: Path) -> list[Path]:
-    name = "claude_desktop_config.json"
-    paths = [
-        home / "Library" / "Application Support" / "Claude" / name,
-        home / ".config" / "Claude" / name,
-    ]
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        paths.insert(0, Path(appdata) / "Claude" / name)
-    return paths
-
-
-def _scan_file(file: Path) -> list[ConfigFinding]:
+def _scan_file(file: Path, client: str) -> list[ConfigFinding]:
     if not file.is_file():
         return []
     data = json.loads(file.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         return []
     findings: list[ConfigFinding] = []
-    for _name, entry in _servers(data).items():
+    for name, entry in _servers(data).items():
         if not isinstance(entry, dict):
+            continue
+        if _is_remote(entry):
+            findings.append(
+                ConfigFinding(
+                    server=str(name),
+                    preset="",
+                    tool="",
+                    snippet={},
+                    path=file,
+                    client=client,
+                    wrapable=False,
+                )
+            )
             continue
         hit = _catalog_hit(_argv(entry))
         if hit is None:
@@ -132,14 +242,23 @@ def _scan_file(file: Path) -> list[ConfigFinding]:
             snippet["env"] = env
         findings.append(
             ConfigFinding(
-                server=str(_name),
+                server=str(name),
                 preset=preset,
                 tool=tool,
                 snippet=snippet,
                 path=file,
+                client=client,
+                wrapable=True,
             )
         )
     return findings
+
+
+def _is_remote(entry: dict) -> bool:
+    if entry.get("command"):
+        return False
+    url = entry.get("url")
+    return isinstance(url, str) and bool(url.strip())
 
 
 def _apply_file(file: Path, findings: list[ConfigFinding]) -> None:
@@ -147,14 +266,22 @@ def _apply_file(file: Path, findings: list[ConfigFinding]) -> None:
     data = json.loads(original)
     if not isinstance(data, dict):
         raise ValueError(f"{file}: not a JSON object")
-    by_name = {finding.server: finding.snippet for finding in findings}
+    by_name = {finding.server: finding.snippet for finding in findings if finding.wrapable}
     for key in ("mcpServers", "servers"):
         value = data.get(key)
-        if not isinstance(value, dict):
-            continue
-        for name, snippet in by_name.items():
-            if name in value:
-                value[name] = snippet
+        if isinstance(value, dict):
+            for name, snippet in by_name.items():
+                if name in value:
+                    value[name] = snippet
+        elif isinstance(value, list):
+            for index, entry in enumerate(value):
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name") or "")
+                if name in by_name:
+                    updated = dict(by_name[name])
+                    updated["name"] = name
+                    value[index] = updated
     backup = file.with_name(file.name + ".bak")
     backup.write_text(original, encoding="utf-8")
     file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -166,6 +293,12 @@ def _servers(data: dict) -> dict:
         value = data.get(key)
         if isinstance(value, dict):
             found.update(value)
+        elif isinstance(value, list):
+            for index, entry in enumerate(value):
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name") or f"server-{index}"
+                found[str(name)] = entry
     return found
 
 

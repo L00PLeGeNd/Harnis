@@ -326,3 +326,75 @@ def test_extra_github_and_postgres_package_names_are_seen(tmp_path: Path):
 
     assert findings["gh"].preset == "github"
     assert findings["db"].preset == "postgres"
+
+
+def test_windsurf_cline_and_continue_configs_are_scanned(
+    tmp_path: Path, monkeypatch
+):
+    from harnis.scan import apply_wraps
+
+    home = tmp_path / "home"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    windsurf = home / ".codeium" / "windsurf" / "mcp_config.json"
+    windsurf.parent.mkdir(parents=True)
+    _write(windsurf, {"github": {"command": "github-mcp-server", "args": ["stdio"]}})
+
+    cline = home / ".cline" / "data" / "settings" / "cline_mcp_settings.json"
+    cline.parent.mkdir(parents=True)
+    _write(cline, {"db": {"command": "npx", "args": ["-y", "postgres-mcp"]}})
+
+    continue_cfg = home / ".continue" / "config.json"
+    continue_cfg.parent.mkdir(parents=True)
+    continue_cfg.write_text(
+        json.dumps(
+            {
+                "mcpServers": [
+                    {
+                        "name": "slack",
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-slack"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    findings = scan_config(None)
+    by_client = {(f.client, f.server): f for f in findings}
+
+    assert ("windsurf", "github") in by_client
+    assert ("cline", "db") in by_client
+    assert ("continue", "slack") in by_client
+
+    applied = apply_wraps(None)
+    assert len(applied) == 3
+    cont = json.loads(continue_cfg.read_text(encoding="utf-8"))
+    assert cont["mcpServers"][0]["command"] == "npx"
+    assert cont["mcpServers"][0]["name"] == "slack"
+    assert cont["mcpServers"][0]["args"][1] == "harnis"
+
+
+def test_url_only_server_is_reported_but_not_applied(tmp_path: Path):
+    from harnis.scan import apply_wraps
+
+    config = tmp_path / "mcp.json"
+    _write(
+        config,
+        {
+            "remote": {"url": "https://example.com/mcp"},
+            "github": {"command": "github-mcp-server", "args": ["stdio"]},
+        },
+    )
+
+    findings = scan_config(config)
+    assert any(f.server == "remote" and f.wrapable is False for f in findings)
+    assert any(f.server == "github" and f.wrapable for f in findings)
+
+    apply_wraps(config)
+    data = json.loads(config.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["remote"] == {"url": "https://example.com/mcp"}
+    assert data["mcpServers"]["github"]["args"][1] == "harnis"

@@ -25,7 +25,7 @@ npx -y harnis demo
 
 Python 3.11+. Filesystem servers stay alone. `--apply` keeps `mcp.json.bak`. `--json` prints findings for scripts. Without `--apply`, scan exits 1 for CI.
 
-Default paths: `.cursor/mcp.json`, `.vscode/mcp.json`, `~/.cursor/mcp.json`, and Claude Desktop's `claude_desktop_config.json`.
+Scans Cursor, VS Code, Claude Desktop, Windsurf, Continue, Cline, and Roo. Continue's `mcpServers` array shape is supported. URL-only MCP servers are reported but not wrapped.
 
 ```yaml
 - uses: L00PLeGeNd/Harnis/.github/actions/scan@main
@@ -54,7 +54,7 @@ npx -y harnis mcp --preset github -- github-mcp-server stdio
 | `readonly` | Non-credential reads | Writes, shell, outbound sends |
 | `ci` | Same file rules as coding-agent | Every shell call |
 
-Default paths for scan: `.cursor/mcp.json`, `.vscode/mcp.json`, `~/.cursor/mcp.json`. The wrap keeps the server's `env`.
+The wrap keeps the server's `env`. Remote `url` entries stay as-is.
 
 ---
 
