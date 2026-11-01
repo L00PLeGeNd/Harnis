@@ -11,6 +11,18 @@ npx -y harnis init
 npx -y harnis status
 ```
 
+If the npm latest lag behind GitHub, use the repo directly:
+
+```bash
+npx -y github:L00PLeGeNd/Harnis init
+```
+
+If the npm latest lag behind GitHub, use the repo directly:
+
+```bash
+npx -y github:L00PLeGeNd/Harnis init
+```
+
 ```text
 hooks: wrote (.cursor/hooks.json)
 policy: wrote (.harnis/policy.json)

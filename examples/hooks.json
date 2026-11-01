@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [{ "command": "npx -y harnis hook" }],
+    "beforeMCPExecution": [{ "command": "npx -y harnis hook", "failClosed": true }],
+    "preToolUse": [{ "command": "npx -y harnis hook" }]
+  }
+}
