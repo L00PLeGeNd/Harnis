@@ -40,6 +40,7 @@ def test_init_writes_hooks_and_policy(tmp_path: Path, monkeypatch, capsys):
     policy = json.loads((tmp_path / ".harnis" / "policy.json").read_text(encoding="utf-8"))
     assert policy["empty_edit_limit"] == 5
     assert policy["max_tool_calls"] == 300
+    assert policy["max_unique_paths"] == 80
 
     data = json.loads(config.read_text(encoding="utf-8"))
     assert data["mcpServers"]["github"]["args"][1] == "harnis"
@@ -93,15 +94,15 @@ def test_status_reports_hooks_policy_and_bare_servers(tmp_path: Path, monkeypatc
 
     assert run(["status"]) == 1
     first = capsys.readouterr().out.casefold()
-    assert "hooks: missing" in first or "hooks missing" in first
+    assert "hooks: optional" in first
     assert "github" in first
 
     assert run(["init", "--no-apply"]) == 0
     capsys.readouterr()
     assert run(["status"]) == 1
     second = capsys.readouterr().out.casefold()
-    assert "hooks: ok" in second or "hooks ok" in second
-    assert "policy: ok" in second or "policy ok" in second
+    assert "hooks: ok" in second
+    assert "policy: ok" in second
     assert "unwrap" in second or "github" in second
 
 
@@ -191,3 +192,28 @@ def test_init_then_status_is_ready(tmp_path: Path, monkeypatch, capsys):
     out = capsys.readouterr().out.casefold()
     assert "posture: protected" in out
     assert "unwrap: none" in out
+
+
+def test_vscode_only_init_skips_hooks_and_still_protects(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    vscode = tmp_path / ".vscode"
+    vscode.mkdir()
+    (vscode / "mcp.json").write_text(
+        json.dumps(
+            {
+                "servers": {
+                    "github": {"command": "github-mcp-server", "args": ["stdio"]}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert run(["init", "--no-hooks"]) == 0
+    out = capsys.readouterr().out.casefold()
+    assert "hooks: skipped" in out
+    assert not (tmp_path / ".cursor" / "hooks.json").exists()
+    assert run(["status"]) == 0
+    status = capsys.readouterr().out.casefold()
+    assert "posture: protected" in status
+    assert "hooks: n/a" in status

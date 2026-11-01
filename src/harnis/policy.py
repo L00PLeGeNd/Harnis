@@ -140,6 +140,7 @@ class Rules:
     preset: str = "coding-agent"
     empty_edit_limit: int = 5
     max_tool_calls: int | None = None
+    max_unique_paths: int | None = None
 
 
 def discover_policy(root: Path | None = None) -> Path | None:
@@ -186,6 +187,9 @@ def load_rules(path: str | None) -> Rules:
         max_tool_calls=_optional_positive_int(
             data.get("max_tool_calls"), "max_tool_calls", default=None
         ),
+        max_unique_paths=_optional_positive_int(
+            data.get("max_unique_paths"), "max_unique_paths", default=None
+        ),
     )
 
 
@@ -219,6 +223,7 @@ def rules_for(preset: str, path: str | None = None) -> Rules:
         preset=preset,
         empty_edit_limit=loaded.empty_edit_limit,
         max_tool_calls=loaded.max_tool_calls,
+        max_unique_paths=loaded.max_unique_paths,
     )
 
 

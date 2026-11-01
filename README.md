@@ -4,33 +4,29 @@
 [![CI](https://github.com/L00PLeGeNd/Harnis/actions/workflows/ci.yml/badge.svg)](https://github.com/L00PLeGeNd/Harnis/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Install once. Stay protected while the agent works.
+Stdio proxy for MCP tool calls. Wrap the servers you already run; denials never reach them.
 
 ```bash
 npx -y harnis init
 npx -y harnis status
 ```
 
-If the npm latest lag behind GitHub, use the repo directly:
-
-```bash
-npx -y github:L00PLeGeNd/Harnis init
-```
-
-If the npm latest lag behind GitHub, use the repo directly:
+If npm lags behind GitHub:
 
 ```bash
 npx -y github:L00PLeGeNd/Harnis init
 ```
 
 ```text
-hooks: wrote (.cursor/hooks.json)
 policy: wrote (.harnis/policy.json)
-wrapped github in .cursor/mcp.json
+hooks: skipped (optional — pass --hooks)
+wrapped github in .vscode/mcp.json
 next: npx -y harnis status
 ```
 
-`init` wires Cursor hooks, drops a project policy (edit thrash + tool-call budget), and wraps dangerous MCP servers behind Harnis. `status` is the daily check: hooks, policy, anything still bare.
+`init` writes a project policy (edit thrash + tool-call budget) and wraps dangerous MCP servers in local configs (`mcp.json`, `.vscode/mcp.json`, `.cursor/mcp.json`, …). Editor hooks are optional (`--hooks`). `status` checks policy and anything still bare.
+
+Works with any client that launches MCP over stdio. `scan` also knows Cursor, VS Code, Claude Desktop, Windsurf, Continue, Cline, and Roo paths. URL-only servers are reported but not wrapped.
 
 ```bash
 npx -y harnis demo
@@ -40,7 +36,7 @@ npx -y harnis demo
 🚨 BLOCKED: agent attempted to delete a file on GitHub (policy: github-delete)
 ```
 
-Python 3.11+. Filesystem servers stay alone. `scan --apply` still works alone; `--json` is for scripts. Scans Cursor, VS Code, Claude Desktop, Windsurf, Continue, Cline, and Roo. URL-only MCP servers are reported but not wrapped.
+Python 3.11+. Filesystem servers stay alone. `scan --apply` and `--json` still work on their own.
 
 ```yaml
 - uses: L00PLeGeNd/Harnis/.github/actions/scan@main
@@ -53,9 +49,7 @@ Python 3.11+. Filesystem servers stay alone. `scan --apply` still works alone; `
 
 Judges `tools/call` before the server sees it. A denial never reaches the server — the client gets a tool error, the terminal prints one line, and `harnis-mcp.html` records it. `initialize` and `tools/list` pass through.
 
-Within one proxy session, near-identical rewrites of the same file (including whitespace-only churn) are denied after five hits (`no-edit-thrash`). Set `empty_edit_limit` and optional `max_tool_calls` in the policy file to tune the session budget.
-
-`harnis init` writes `.cursor/hooks.json` for you (`beforeShellExecution`, `beforeMCPExecution`, `preToolUse`). Session budget state lives under the temp dir, keyed by `conversation_id`. Project policy is auto-loaded from `.harnis/policy.json` (or `HARNIS_POLICY`).
+Within one proxy session, Harnis can stop empty edit thrash (`no-edit-thrash`), runaway `tools/call` counts (`no-tool-budget`), and wide path wandering (`no-path-wander`). Tune with `empty_edit_limit`, `max_tool_calls`, and `max_unique_paths` in the policy file. Project policy is auto-loaded from `.harnis/policy.json` (or `HARNIS_POLICY`).
 
 ```bash
 npx -y harnis mcp --preset github -- github-mcp-server stdio
@@ -78,6 +72,8 @@ npx -y harnis mcp --preset github -- github-mcp-server stdio
 
 The wrap keeps the server's `env`. Remote `url` entries stay as-is.
 
+Optional: editors that support agent hooks can point them at `npx -y harnis hook` (`init --hooks` writes a Cursor-compatible `.cursor/hooks.json`). Session budget state lives under the temp dir, keyed by `conversation_id`.
+
 ---
 
 ## Policy
@@ -99,7 +95,8 @@ On a filesystem server, `list_directory`, `directory_tree`, `search_files`, and 
   "deny_file_names": ["token.txt"],
   "allow_path_parts": ["fixtures"],
   "empty_edit_limit": 5,
-  "max_tool_calls": 200
+  "max_tool_calls": 200,
+  "max_unique_paths": 80
 }
 ```
 
@@ -142,30 +139,18 @@ harnis protect -- python examples/curious_agent.py
 
 ```text
 🚨 BLOCKED: agent attempted to run rm -rf /tmp/harnis-scratch (policy: no-destructive-exec)
-🚨 BLOCKED: agent attempted to send secrets to https://collect.example/upload (policy: no-secret-exfil)
 ```
 
 Covers CPython `open`, `subprocess`, `os.system`, `urllib`, `http.client`, `ssl.SSLSocket.send`, and child Python processes. Linux x86_64 non-Python commands use ptrace. On Windows, use the Python form.
 
-```python
-from harnis import judge_tool_call
-
-decision = judge_tool_call("read_file", {"path": "/home/me/.ssh/id_rsa"})
-decision.allowed  # False
-decision.line()
-```
-
 ---
 
-## Limits
-
-Raw-address `ctypes` is outside the audit hook. `shell=True` children are not re-injected. Probe does not generate exploits.
-
-## Development
+## Install
 
 ```bash
-pip install -e .
-python -m pytest
+npx -y harnis init
+# or
+pip install "harnis @ git+https://github.com/L00PLeGeNd/Harnis.git"
 ```
 
-MIT · [LICENSE](LICENSE)
+MIT. Issues and PRs welcome.

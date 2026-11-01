@@ -22,22 +22,24 @@ harnis probe -- examples/leaky_agent.py
 harnis probe --transcript session.jsonl
 harnis hook
 
-init     Install Cursor hooks + .harnis/policy.json, then wrap catalog MCP servers.
-status   Show hooks, policy, and anything still unwrapped.
+init     Write .harnis/policy.json and wrap local MCP servers (optional editor hooks).
+status   Show policy, wraps, and optional hooks posture.
 scan     Read mcp.json. Name the dangerous tool and print a wrap, or --apply it.
 demo     Print one BLOCKED line for a GitHub delete_file. Nothing is executed.
 mcp      Judge tools/call, then forward the rest to an MCP stdio server.
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Judge tool calls the MCP proxy would refuse. A transcript is not executed.
-hook     Cursor agent hook: read one event from stdin, print permission JSON.
+hook     Editor hook adapter: stdin JSON event → permission JSON.
 
 Options:
   --apply             Rewrite bare catalog servers in mcp.json. Keep a .bak copy
-  --no-apply          init: install hooks/policy only
+  --no-apply          init: policy only (and hooks if requested), no wraps
+  --hooks             init: install editor hooks under .cursor/hooks.json
+  --no-hooks          init: never install hooks
   --json              Print scan findings as JSON
   --preset NAME       coding-agent (default), readonly, ci, github, postgres, slack, browser, or email
   --report PATH       HTML report
-  --policy PATH       JSON file: deny/allow paths, empty_edit_limit, max_tool_calls
+  --policy PATH       JSON: deny/allow paths, empty_edit_limit, max_tool_calls, max_unique_paths
   --url URL           Probe an HTTP agent instead of a local script
   --transcript PATH   Judge a recorded MCP JSONL session. Nothing is executed
   --scenario LIST     Comma list: credential,destructive,rag,escalation,exfil,all
@@ -104,6 +106,7 @@ def init_command(args: list[str]) -> int:
         sys.stdout.write(USAGE)
         return 0
     apply = True
+    hooks: bool | None = None
     for flag in args:
         if flag == "--no-apply":
             apply = False
@@ -111,9 +114,15 @@ def init_command(args: list[str]) -> int:
         if flag == "--apply":
             apply = True
             continue
-        return _error("usage: harnis init [--apply|--no-apply]")
+        if flag == "--hooks":
+            hooks = True
+            continue
+        if flag == "--no-hooks":
+            hooks = False
+            continue
+        return _error("usage: harnis init [--apply|--no-apply] [--hooks|--no-hooks]")
     try:
-        report = init_project(apply=apply)
+        report = init_project(apply=apply, hooks=hooks)
     except (OSError, ValueError) as exc:
         return _error(str(exc))
     sys.stdout.write(format_init(report))

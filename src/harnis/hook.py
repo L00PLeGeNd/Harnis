@@ -1,4 +1,7 @@
-"""Cursor agent hooks: stdin JSON in, permission JSON out."""
+"""Editor agent hooks: stdin JSON in, permission JSON out.
+
+Compatible with Cursor-style hook events; other editors can send the same shape.
+"""
 
 from __future__ import annotations
 

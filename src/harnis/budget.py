@@ -1,4 +1,4 @@
-"""Session budget: stop thrashing edits and runaway tool loops."""
+"""Session budget: stop thrashing edits, runaway calls, and path wandering."""
 
 from __future__ import annotations
 
@@ -14,22 +14,41 @@ _WRITE_TOOLS = frozenset({
     "write",
     "save_file",
 })
+_PATH_TOOLS = _WRITE_TOOLS | frozenset({
+    "read_file",
+    "read_text_file",
+    "read_media_file",
+    "read_multiple_files",
+    "read",
+    "open_file",
+    "cat",
+    "fetch_file",
+    "list_directory",
+    "list_directory_with_sizes",
+    "directory_tree",
+    "search_files",
+    "get_file_info",
+    "move_file",
+})
 
 
 @dataclass
 class EditBudget:
-    """Count near-identical writes and total tools/call within one session."""
+    """Count near-identical writes, tool calls, and unique paths in one session."""
 
     empty_edit_limit: int = 5
     max_tool_calls: int | None = None
+    max_unique_paths: int | None = None
     _streak: dict[str, tuple[str, int]] = field(default_factory=dict)
     _calls: int = 0
+    _paths: set[str] = field(default_factory=set)
 
     @classmethod
     def from_rules(cls, rules: Rules) -> EditBudget:
         return cls(
             empty_edit_limit=rules.empty_edit_limit,
             max_tool_calls=rules.max_tool_calls,
+            max_unique_paths=rules.max_unique_paths,
         )
 
     def judge(self, name: str, arguments: dict) -> Decision | None:
@@ -40,6 +59,20 @@ class EditBudget:
                 "no-tool-budget",
                 f"exceed the tool-call budget ({self.max_tool_calls})",
             )
+        path_hit = _path_target(name, arguments)
+        if path_hit is not None:
+            key = path_hit.replace("\\", "/").casefold()
+            if key not in self._paths:
+                if (
+                    self.max_unique_paths is not None
+                    and len(self._paths) >= self.max_unique_paths
+                ):
+                    return Decision(
+                        False,
+                        "no-path-wander",
+                        f"touch more than {self.max_unique_paths} distinct paths",
+                    )
+                self._paths.add(key)
         path, content = _write_target(name, arguments)
         if path is None or content is None:
             return None
@@ -63,7 +96,9 @@ class EditBudget:
         return {
             "empty_edit_limit": self.empty_edit_limit,
             "max_tool_calls": self.max_tool_calls,
+            "max_unique_paths": self.max_unique_paths,
             "calls": self._calls,
+            "paths": sorted(self._paths),
             "streak": {key: [finger, count] for key, (finger, count) in self._streak.items()},
         }
 
@@ -71,6 +106,9 @@ class EditBudget:
     def from_dict(cls, data: dict, rules: Rules) -> EditBudget:
         budget = cls.from_rules(rules)
         budget._calls = int(data.get("calls") or 0)
+        paths = data.get("paths") or []
+        if isinstance(paths, list):
+            budget._paths = {str(item) for item in paths}
         streak = data.get("streak") or {}
         if isinstance(streak, dict):
             loaded: dict[str, tuple[str, int]] = {}
@@ -95,6 +133,24 @@ class EditBudget:
         if not isinstance(data, dict):
             return cls.from_rules(rules)
         return cls.from_dict(data, rules)
+
+
+def _path_target(name: str, arguments: dict) -> str | None:
+    normalized = name.strip().lower().replace("-", "_")
+    if normalized not in _PATH_TOOLS:
+        return None
+    if not isinstance(arguments, dict):
+        return None
+    for key in ("path", "file", "uri", "file_path", "source", "destination", "dest"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    paths = arguments.get("paths")
+    if isinstance(paths, list):
+        for item in paths:
+            if isinstance(item, str) and item.strip():
+                return item
+    return None
 
 
 def _write_target(name: str, arguments: dict) -> tuple[str | None, str | None]:

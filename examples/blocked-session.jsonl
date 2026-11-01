@@ -1,0 +1,7 @@
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"/home/agent/.ssh/id_rsa"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delete_file","arguments":{"owner":"acme","repo":"app","path":"secret.env","branch":"main"}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"/work/app.py","content":"x = 1\n"}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"/work/app.py","content":"x = 1\n"}}}
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"/work/app.py","content":"x = 1\n"}}}
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"/work/app.py","content":"x = 1\n"}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"/work/app.py","content":"x = 1\n"}}}

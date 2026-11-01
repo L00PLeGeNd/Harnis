@@ -1,4 +1,4 @@
-"""Project-local Harnis files: policy, Cursor hooks, posture summary."""
+"""Project-local Harnis files: policy, optional editor hooks, posture summary."""
 
 from __future__ import annotations
 
@@ -13,13 +13,14 @@ from harnis.scan import ConfigFinding, apply_wraps, scan_config
 _DEFAULT_POLICY = {
     "empty_edit_limit": 5,
     "max_tool_calls": 300,
+    "max_unique_paths": 80,
 }
 _HOOK_EVENTS = ("beforeShellExecution", "beforeMCPExecution", "preToolUse")
 
 
 @dataclass(frozen=True)
 class InitReport:
-    hooks_path: Path
+    hooks_path: Path | None
     hooks_action: str
     policy_path: Path
     policy_action: str
@@ -37,12 +38,26 @@ class StatusReport:
     @property
     def ready(self) -> bool:
         open_wraps = any(finding.wrapable for finding in self.findings)
-        return self.hooks == "ok" and self.policy == "ok" and not open_wraps
+        return self.policy == "ok" and not open_wraps
 
 
-def init_project(root: Path | None = None, *, apply: bool = True) -> InitReport:
+def init_project(
+    root: Path | None = None,
+    *,
+    apply: bool = True,
+    hooks: bool | None = None,
+) -> InitReport:
+    """Install policy, wrap local MCP configs, optionally install editor hooks.
+
+    hooks=None installs hooks only when `.cursor/` already exists.
+    hooks=True always writes them; hooks=False never does.
+    """
     base = Path.cwd() if root is None else Path(root)
-    hooks_path, hooks_action = _ensure_hooks(base)
+    want_hooks = bool((base / ".cursor").is_dir()) if hooks is None else hooks
+    hooks_path: Path | None = None
+    hooks_action = "skipped"
+    if want_hooks:
+        hooks_path, hooks_action = _ensure_hooks(base)
     policy_path, policy_action = _ensure_policy(base)
     applied: list[ConfigFinding] = []
     if apply:
@@ -60,7 +75,12 @@ def init_project(root: Path | None = None, *, apply: bool = True) -> InitReport:
 def status_report(root: Path | None = None) -> StatusReport:
     base = Path.cwd() if root is None else Path(root)
     hooks_path = base / ".cursor" / "hooks.json"
-    hooks = "ok" if _hooks_have_harnis(hooks_path) else "missing"
+    if _hooks_have_harnis(hooks_path):
+        hooks = "ok"
+    elif (base / ".cursor").is_dir():
+        hooks = "optional"
+    else:
+        hooks = "n/a"
     policy_path = discover_policy(base)
     policy = "ok" if policy_path is not None else "missing"
     scanned = tuple(_project_mcp_paths(base))
@@ -78,9 +98,13 @@ def status_report(root: Path | None = None) -> StatusReport:
 
 def format_init(report: InitReport) -> str:
     lines = [
-        f"hooks: {report.hooks_action} ({report.hooks_path})",
         f"policy: {report.policy_action} ({report.policy_path})",
     ]
+    if report.hooks_action != "skipped":
+        where = report.hooks_path or ".cursor/hooks.json"
+        lines.append(f"hooks: {report.hooks_action} ({where})")
+    else:
+        lines.append("hooks: skipped (optional — pass --hooks)")
     if report.applied:
         for finding in report.applied:
             where = finding.path or "mcp.json"
@@ -93,15 +117,15 @@ def format_init(report: InitReport) -> str:
 
 def format_status(report: StatusReport) -> str:
     lines = [
-        f"hooks: {report.hooks}",
         f"policy: {report.policy}"
         + (f" ({report.policy_path})" if report.policy_path else ""),
+        f"hooks: {report.hooks}",
     ]
     if report.scanned:
         listed = ", ".join(str(path) for path in report.scanned)
         lines.append(f"scanned: {listed}")
     else:
-        lines.append("scanned: no mcp.json found")
+        lines.append("scanned: no local mcp.json found")
     wrapable = [finding for finding in report.findings if finding.wrapable]
     remotes = [finding for finding in report.findings if not finding.wrapable]
     if wrapable:
@@ -121,7 +145,11 @@ def format_status(report: StatusReport) -> str:
 def _project_mcp_paths(base: Path) -> list[Path]:
     return [
         path
-        for path in (base / ".cursor" / "mcp.json", base / ".vscode" / "mcp.json")
+        for path in (
+            base / "mcp.json",
+            base / ".cursor" / "mcp.json",
+            base / ".vscode" / "mcp.json",
+        )
         if path.is_file()
     ]
 

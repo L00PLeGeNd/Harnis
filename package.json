@@ -1,7 +1,7 @@
 {
   "name": "harnis",
-  "version": "0.7.0",
-  "description": "Init once: Cursor hooks, edit budgets, and MCP wraps that block dangerous agent tool calls.",
+  "version": "0.7.1",
+  "description": "Stdio proxy and project init that wrap MCP servers and block dangerous agent tool calls.",
   "license": "MIT",
   "repository": {
     "type": "git",

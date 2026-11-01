@@ -13,7 +13,7 @@ from harnis.policy import (
 )
 from harnis.probe import Finding, HttpAgent, ProbeTarget, Turn, probe, scenario_pack
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 __all__ = [
     "Action",

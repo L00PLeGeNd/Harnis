@@ -143,3 +143,27 @@ def test_policy_file_sets_max_tool_calls(tmp_path):
     blocked = handle_client_message({**read, "id": 2}, rules, budget)
     assert blocked is not None
     assert "no-tool-budget" in blocked["result"]["content"][0]["text"]
+
+
+def test_max_unique_paths_stops_directory_wandering():
+    from harnis.budget import EditBudget
+    from harnis.mcp_proxy import handle_client_message
+    from harnis.policy import Rules
+
+    budget = EditBudget(max_unique_paths=2)
+    rules = Rules()
+
+    def read(path: str, call_id: int) -> dict:
+        return {
+            "jsonrpc": "2.0",
+            "id": call_id,
+            "method": "tools/call",
+            "params": {"name": "read_file", "arguments": {"path": path}},
+        }
+
+    assert handle_client_message(read("/work/a.py", 1), rules, budget) is None
+    assert handle_client_message(read("/work/b.py", 2), rules, budget) is None
+    assert handle_client_message(read("/work/a.py", 3), rules, budget) is None
+    blocked = handle_client_message(read("/work/c.py", 4), rules, budget)
+    assert blocked is not None
+    assert "no-path-wander" in blocked["result"]["content"][0]["text"]
