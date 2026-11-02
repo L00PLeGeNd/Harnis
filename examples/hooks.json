@@ -1,8 +1,8 @@
 {
   "version": 1,
   "hooks": {
-    "beforeShellExecution": [{ "command": "npx -y github:L00PLeGeNd/Harnis hook" }],
-    "beforeMCPExecution": [{ "command": "npx -y github:L00PLeGeNd/Harnis hook", "failClosed": true }],
-    "preToolUse": [{ "command": "npx -y github:L00PLeGeNd/Harnis hook" }]
+    "beforeShellExecution": [{ "command": "npx -y harnis hook" }],
+    "beforeMCPExecution": [{ "command": "npx -y harnis hook", "failClosed": true }],
+    "preToolUse": [{ "command": "npx -y harnis hook" }]
   }
 }

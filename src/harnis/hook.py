@@ -119,7 +119,9 @@ def _allow() -> dict:
 
 
 def default_hooks_json() -> dict:
-    command = "npx -y github:L00PLeGeNd/Harnis hook"
+    command = "npx -y harnis hook"
+    if os.name == "nt":
+        command = "npx -y harnis hook"
     return {
         "version": 1,
         "hooks": {
