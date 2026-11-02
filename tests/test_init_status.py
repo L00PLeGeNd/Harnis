@@ -33,7 +33,7 @@ def test_init_writes_hooks_and_policy(tmp_path: Path, monkeypatch, capsys):
 
     hooks = json.loads((tmp_path / ".cursor" / "hooks.json").read_text(encoding="utf-8"))
     assert any(
-        "harnis hook" in entry.get("command", "")
+        "harnis" in entry.get("command", "").casefold() and "hook" in entry.get("command", "")
         for group in hooks["hooks"].values()
         for entry in group
     )
@@ -44,7 +44,7 @@ def test_init_writes_hooks_and_policy(tmp_path: Path, monkeypatch, capsys):
     assert policy["max_unique_paths"] == 80
 
     data = json.loads(config.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["github"]["args"][1] == "harnis"
+    assert data["mcpServers"]["github"]["args"][1] == "github:L00PLeGeNd/Harnis"
 
 
 def test_init_is_idempotent_and_keeps_foreign_hooks(tmp_path: Path, monkeypatch, capsys):
@@ -57,7 +57,7 @@ def test_init_is_idempotent_and_keeps_foreign_hooks(tmp_path: Path, monkeypatch,
                 "version": 1,
                 "hooks": {
                     "stop": [{"command": "echo done"}],
-                    "beforeShellExecution": [{"command": "npx -y harnis hook"}],
+                    "beforeShellExecution": [{"command": "npx -y github:L00PLeGeNd/Harnis hook"}],
                 },
             }
         ),
@@ -154,7 +154,7 @@ def test_status_ready_ignores_url_only_servers(tmp_path: Path, monkeypatch, caps
             {
                 "version": 1,
                 "hooks": {
-                    "beforeShellExecution": [{"command": "npx -y harnis hook"}],
+                    "beforeShellExecution": [{"command": "npx -y github:L00PLeGeNd/Harnis hook"}],
                     "beforeMCPExecution": [{"command": "npx -y harnis hook"}],
                     "preToolUse": [{"command": "npx -y harnis hook"}],
                 },

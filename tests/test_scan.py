@@ -26,7 +26,7 @@ def test_bare_github_server_asks_for_the_github_preset(tmp_path: Path):
     assert findings[0].snippet["command"] == "npx"
     assert findings[0].snippet["args"] == [
         "-y",
-        "harnis",
+        "github:L00PLeGeNd/Harnis",
         "mcp",
         "--preset",
         "github",
@@ -235,7 +235,7 @@ def test_apply_wraps_the_github_server_and_keeps_a_backup(tmp_path: Path):
     assert entry["command"] == "npx"
     assert entry["args"][:5] == [
         "-y",
-        "harnis",
+        "github:L00PLeGeNd/Harnis",
         "mcp",
         "--preset",
         "github",
@@ -284,7 +284,7 @@ def test_scan_json_prints_findings_as_json(tmp_path: Path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload[0]["server"] == "github"
     assert payload[0]["tool"] == "delete_file"
-    assert payload[0]["snippet"]["args"][1] == "harnis"
+    assert payload[0]["snippet"]["args"][1] == "github:L00PLeGeNd/Harnis"
 
 
 def test_claude_desktop_config_is_scanned_by_default(tmp_path: Path, monkeypatch):
@@ -389,7 +389,7 @@ def test_windsurf_cline_and_continue_configs_are_scanned(
     cont = json.loads(continue_cfg.read_text(encoding="utf-8"))
     assert cont["mcpServers"][0]["command"] == "npx"
     assert cont["mcpServers"][0]["name"] == "docs"
-    assert cont["mcpServers"][0]["args"][1] == "harnis"
+    assert cont["mcpServers"][0]["args"][1] == "github:L00PLeGeNd/Harnis"
 
 
 def test_url_only_server_is_reported_but_not_applied(tmp_path: Path):
@@ -411,4 +411,4 @@ def test_url_only_server_is_reported_but_not_applied(tmp_path: Path):
     apply_wraps(config)
     data = json.loads(config.read_text(encoding="utf-8"))
     assert data["mcpServers"]["remote"] == {"url": "https://example.com/mcp"}
-    assert data["mcpServers"]["github"]["args"][1] == "harnis"
+    assert data["mcpServers"]["github"]["args"][1] == "github:L00PLeGeNd/Harnis"

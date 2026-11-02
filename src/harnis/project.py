@@ -112,7 +112,7 @@ def format_init(report: InitReport) -> str:
             lines.append(f"wrapped {finding.server} in {where}")
     else:
         lines.append("wraps: nothing new to apply")
-    lines.append("next: npx -y harnis status")
+    lines.append("next: npx -y github:L00PLeGeNd/Harnis status")
     return "\n".join(lines) + "\n"
 
 
@@ -139,7 +139,7 @@ def format_status(report: StatusReport) -> str:
     if report.ready:
         lines.append("posture: protected")
     else:
-        lines.append("fix: npx -y harnis init")
+        lines.append("fix: npx -y github:L00PLeGeNd/Harnis init")
     return "\n".join(lines) + "\n"
 
 

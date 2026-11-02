@@ -10,7 +10,13 @@ from harnis.scan import apply_wraps, scan_config
 
 def _assert_wrapped(entry: dict) -> None:
     assert entry["command"] == "npx"
-    assert entry["args"][:5] == ["-y", "harnis", "mcp", "--preset", "github"]
+    assert entry["args"][:5] == [
+        "-y",
+        "github:L00PLeGeNd/Harnis",
+        "mcp",
+        "--preset",
+        "github",
+    ]
 
 
 def test_vscode_servers_object_is_wrapped(tmp_path: Path):
@@ -127,7 +133,7 @@ def test_claude_json_project_servers_are_scanned_and_wrapped(tmp_path: Path):
     data = json.loads(config.read_text(encoding="utf-8"))
     _assert_wrapped(data["mcpServers"]["github"])
     db = data["projects"][str(tmp_path)]["mcpServers"]["db"]
-    assert db["args"][1] == "harnis"
+    assert db["args"][1] == "github:L00PLeGeNd/Harnis"
     assert db["args"][4] == "postgres"
 
 
@@ -153,7 +159,7 @@ def test_codex_toml_mcp_servers_are_wrapped(tmp_path: Path):
     assert len(apply_wraps(config)) == 1
     text = config.read_text(encoding="utf-8")
     assert 'command = "npx"' in text
-    assert "harnis" in text
+    assert "github:L00PLeGeNd/Harnis" in text
     assert 'model = "gpt-5"' in text
     assert scan_config(config) == []
 

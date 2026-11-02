@@ -1,7 +1,7 @@
 {
   "name": "harnis",
-  "version": "0.8.0",
-  "description": "Python stdio MCP seatbelt (npx launches python -m harnis).",
+  "version": "0.8.1",
+  "description": "Python stdio MCP seatbelt. Prefer: npx -y github:L00PLeGeNd/Harnis",
   "license": "MIT",
   "repository": {
     "type": "git",

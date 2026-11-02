@@ -3,7 +3,7 @@
 Local **stdio MCP seatbelt**: judge `tools/call` and path-like `resources/read` before the server sees them. A denial never reaches the child process.
 
 ```bash
-npx -y harnis mcp --preset github -- github-mcp-server stdio
+npx -y github:L00PLeGeNd/Harnis mcp --preset github -- github-mcp-server stdio
 ```
 
 ```text
@@ -13,11 +13,11 @@ npx -y harnis mcp --preset github -- github-mcp-server stdio
 Thirty-second wrap of a config you already have:
 
 ```bash
-npx -y harnis init
-npx -y harnis status
+npx -y github:L00PLeGeNd/Harnis init
+npx -y github:L00PLeGeNd/Harnis status
 ```
 
-**Python 3.11+.** The npm package only spawns `python -m harnis`. This is not a Node security runtime.
+**Python 3.11+.** `npx` only clones this repo and runs `python -m harnis`. Install comes from **GitHub** (tracks `main`); the npm name may lag and is optional.
 
 Read the [threat model](THREAT_MODEL.md) before treating this as a sandbox. URL MCP, unresolvable symlinks, renamed tools with no credential args, and anything that never passes through `harnis mcp` are out of scope.
 
@@ -67,7 +67,7 @@ Session budgets (optional, via `.harnis/policy.json`): `empty_edit_limit`, `max_
 `deny_tools` is how a project closes renamed-tool gaps that presets miss. Credential paths and secret-shaped strings are scanned in **every** `tools/call` argument tree regardless of tool name.
 
 ```bash
-harnis mcp --policy .harnis/policy.json --preset coding-agent -- <server>
+npx -y github:L00PLeGeNd/Harnis mcp --policy .harnis/policy.json --preset coding-agent -- <server>
 ```
 
 ---
@@ -77,7 +77,7 @@ harnis mcp --policy .harnis/policy.json --preset coding-agent -- <server>
 ```bash
 python -m pip install -e . pytest
 python -m pytest -q
-python -m pytest tests/test_adversarial.py -q
+python -m pytest tests/test_adversarial.py tests/test_control_plane.py -q
 ```
 
 MIT.

@@ -23,7 +23,8 @@ _SHELLS = frozenset(
     for name in (base, f"{base}.exe")
 )
 _NPX = frozenset({"npx", "npx.cmd", "npx.exe"})
-_LAUNCH = "harnis"
+# Prefer GitHub over npm so wraps track main without an npm OTP publish.
+_LAUNCH = "github:L00PLeGeNd/Harnis"
 _HARNIS_PACKAGES = frozenset({"harnis", "github:l00plegend/harnis"})
 
 

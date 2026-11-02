@@ -7,10 +7,10 @@ Harnis is a **seatbelt for local stdio MCP**, not a sandbox and not a distribute
 Wrap a local stdio MCP server so judged traffic is decided **before** the child process sees it. A denial is returned to the client and is not forwarded.
 
 ```bash
-npx -y harnis mcp --preset github -- <server>
+npx -y github:L00PLeGeNd/Harnis mcp --preset github -- <server>
 ```
 
-`npx` only launches the Python package (`python -m harnis`). The product is Python.
+`npx` clones this repo and runs `python -m harnis`. The product is Python.
 
 ## In scope (what we try to stop)
 
