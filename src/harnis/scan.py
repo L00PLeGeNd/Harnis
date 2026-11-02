@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,14 +16,6 @@ _PACKAGES: tuple[tuple[str, str, str], ...] = (
     ("@modelcontextprotocol/server-postgres", "postgres", "postgres_mcp_modify"),
     ("@crystaldba/postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("postgres-mcp", "postgres", "postgres_mcp_modify"),
-    ("@modelcontextprotocol/server-slack", "slack", "slack_post_message"),
-    ("@modelcontextprotocol/server-puppeteer", "browser", "browser_evaluate"),
-    ("@playwright/mcp", "browser", "browser_evaluate"),
-    ("playwright-mcp", "browser", "browser_evaluate"),
-    ("@executeautomation/playwright-mcp-server", "browser", "browser_evaluate"),
-    ("@gongrzhe/server-gmail-autoauth-mcp", "email", "send_email"),
-    ("@l404biol/gmail-mcp", "email", "send_email"),
-    ("gmail-mcp", "email", "send_email"),
 )
 _SHELLS = frozenset(
     name
@@ -102,7 +95,14 @@ def apply_wraps(path: Path | None = None) -> list[ConfigFinding]:
 def _default_targets() -> list[tuple[str, Path]]:
     home = Path.home()
     appdata = os.environ.get("APPDATA")
+    # Claude first (Code + Desktop), then GPT/Codex, then other editors.
     candidates: list[tuple[str, Path]] = [
+        ("claude-code", Path(".mcp.json")),
+        ("claude-code", home / ".claude.json"),
+        ("claude-desktop", home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"),
+        ("claude-desktop", home / ".config" / "Claude" / "claude_desktop_config.json"),
+        ("codex", Path(".codex/config.toml")),
+        ("codex", home / ".codex" / "config.toml"),
         ("cursor", Path(".cursor/mcp.json")),
         ("vscode", Path(".vscode/mcp.json")),
         ("cursor", home / ".cursor" / "mcp.json"),
@@ -110,8 +110,6 @@ def _default_targets() -> list[tuple[str, Path]]:
         ("continue", home / ".continue" / "config.json"),
         ("cline", home / ".cline" / "data" / "settings" / "cline_mcp_settings.json"),
         ("cline", home / ".cline" / "mcp.json"),
-        ("claude-desktop", home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"),
-        ("claude-desktop", home / ".config" / "Claude" / "claude_desktop_config.json"),
     ]
     if appdata:
         base = Path(appdata)
@@ -213,8 +211,8 @@ def _default_targets() -> list[tuple[str, Path]]:
 def _scan_file(file: Path, client: str) -> list[ConfigFinding]:
     if not file.is_file():
         return []
-    data = json.loads(file.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
+    data = _load_config(file)
+    if data is None:
         return []
     findings: list[ConfigFinding] = []
     for name, entry in _servers(data).items():
@@ -270,16 +268,26 @@ def _is_remote(entry: dict) -> bool:
 
 def _apply_file(file: Path, findings: list[ConfigFinding]) -> None:
     original = file.read_text(encoding="utf-8")
-    data = json.loads(original)
-    if not isinstance(data, dict):
-        raise ValueError(f"{file}: not a JSON object")
+    data = _load_config(file)
+    if data is None:
+        raise ValueError(f"{file}: not a supported MCP config object")
     by_name = {finding.server: finding.snippet for finding in findings if finding.wrapable}
-    for key in ("mcpServers", "servers"):
+    _apply_server_maps(data, by_name)
+    backup = file.with_name(file.name + ".bak")
+    backup.write_text(original, encoding="utf-8")
+    if _is_toml(file):
+        file.write_text(_dump_toml(data), encoding="utf-8")
+    else:
+        file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _apply_server_maps(data: dict, by_name: dict[str, dict]) -> None:
+    for key in ("mcpServers", "servers", "mcp_servers"):
         value = data.get(key)
         if isinstance(value, dict):
             for name, snippet in by_name.items():
                 if name in value:
-                    value[name] = snippet
+                    value[name] = dict(snippet)
         elif isinstance(value, list):
             for index, entry in enumerate(value):
                 if not isinstance(entry, dict):
@@ -289,14 +297,35 @@ def _apply_file(file: Path, findings: list[ConfigFinding]) -> None:
                     updated = dict(by_name[name])
                     updated["name"] = name
                     value[index] = updated
-    backup = file.with_name(file.name + ".bak")
-    backup.write_text(original, encoding="utf-8")
-    file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    projects = data.get("projects")
+    if isinstance(projects, dict):
+        for body in projects.values():
+            if isinstance(body, dict):
+                _apply_server_maps(body, by_name)
+
+
+def _load_config(file: Path) -> dict | None:
+    raw = file.read_text(encoding="utf-8")
+    if _is_toml(file):
+        try:
+            data = tomllib.loads(raw)
+        except tomllib.TOMLDecodeError:
+            return None
+        return data if isinstance(data, dict) else None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_toml(file: Path) -> bool:
+    return file.suffix.casefold() == ".toml"
 
 
 def _servers(data: dict) -> dict:
     found: dict = {}
-    for key in ("mcpServers", "servers"):
+    for key in ("mcpServers", "servers", "mcp_servers"):
         value = data.get(key)
         if isinstance(value, dict):
             found.update(value)
@@ -306,7 +335,55 @@ def _servers(data: dict) -> dict:
                     continue
                 name = entry.get("name") or f"server-{index}"
                 found[str(name)] = entry
+    projects = data.get("projects")
+    if isinstance(projects, dict):
+        for body in projects.values():
+            if not isinstance(body, dict):
+                continue
+            nested = body.get("mcpServers")
+            if isinstance(nested, dict):
+                found.update(nested)
     return found
+
+
+def _dump_toml(data: dict) -> str:
+    """Serialize a limited TOML subset for Codex-style MCP configs."""
+    lines: list[str] = []
+    scalars = {key: value for key, value in data.items() if not isinstance(value, dict)}
+    tables = {key: value for key, value in data.items() if isinstance(value, dict)}
+    for key, value in scalars.items():
+        lines.append(f"{key} = {_toml_atom(value)}")
+    if scalars and tables:
+        lines.append("")
+    for key, value in tables.items():
+        _dump_toml_table(lines, key, value)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _dump_toml_table(lines: list[str], name: str, table: dict) -> None:
+    nested = {key: value for key, value in table.items() if isinstance(value, dict)}
+    plain = {key: value for key, value in table.items() if not isinstance(value, dict)}
+    if plain or not nested:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.append(f"[{name}]")
+        for key, value in plain.items():
+            lines.append(f"{key} = {_toml_atom(value)}")
+    for key, value in nested.items():
+        _dump_toml_table(lines, f"{name}.{key}", value)
+
+
+def _toml_atom(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_atom(item) for item in value) + "]"
+    raise TypeError(f"unsupported TOML value: {type(value)!r}")
 
 
 def _catalog_hit(tokens: list[str]) -> tuple[str, str] | None:

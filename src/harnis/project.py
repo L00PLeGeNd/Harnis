@@ -11,6 +11,7 @@ from harnis.policy import discover_policy
 from harnis.scan import ConfigFinding, apply_wraps, scan_config
 
 _DEFAULT_POLICY = {
+    "deny_tools": [],
     "empty_edit_limit": 5,
     "max_tool_calls": 300,
     "max_unique_paths": 80,
@@ -146,9 +147,13 @@ def _project_mcp_paths(base: Path) -> list[Path]:
     return [
         path
         for path in (
+            base / ".mcp.json",
+            base / ".codex" / "config.toml",
             base / "mcp.json",
             base / ".cursor" / "mcp.json",
             base / ".vscode" / "mcp.json",
+            base / ".continue" / "config.json",
+            base / ".codeium" / "windsurf" / "mcp_config.json",
         )
         if path.is_file()
     ]

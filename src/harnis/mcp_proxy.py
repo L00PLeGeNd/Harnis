@@ -1,7 +1,7 @@
 """Newline-delimited JSON-RPC proxy in front of an MCP stdio server.
 
-A tools/call is judged before the server process sees it. A denial is
-returned to the client as a tool error and is not forwarded.
+tools/call and path-like resources/read are judged before the server
+process sees them. A denial is returned to the client and is not forwarded.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 
 from harnis.budget import EditBudget
-from harnis.policy import Decision, Rules, judge_tool_call
+from harnis.policy import Decision, Rules, judge_resource_read, judge_tool_call
 from harnis.report import Session, emit
 
 
@@ -41,10 +41,15 @@ def decision_for_message(
     rules: Rules | None = None,
     budget: EditBudget | None = None,
 ) -> Decision | None:
-    if not isinstance(message, dict) or message.get("method") != "tools/call":
+    if not isinstance(message, dict):
         return None
+    method = message.get("method")
     params = message.get("params") or {}
     if not isinstance(params, dict):
+        return None
+    if method == "resources/read":
+        return judge_resource_read(str(params.get("uri") or ""), rules)
+    if method != "tools/call":
         return None
     name = str(params.get("name") or "")
     arguments = _arguments(params.get("arguments"))

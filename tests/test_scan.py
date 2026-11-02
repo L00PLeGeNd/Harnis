@@ -91,13 +91,12 @@ def test_python_module_wrap_is_quiet(tmp_path: Path):
     assert scan_config(config) == []
 
 
-def test_postgres_slack_and_shell_are_in_the_catalog(tmp_path: Path):
+def test_postgres_and_shell_are_in_the_catalog(tmp_path: Path):
     config = tmp_path / "mcp.json"
     _write(
         config,
         {
             "db": {"command": "npx", "args": ["-y", "@microsoft/postgres-mcp"]},
-            "chat": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-slack"]},
             "sh": {"command": "bash", "args": ["server.sh"]},
         },
     )
@@ -106,7 +105,6 @@ def test_postgres_slack_and_shell_are_in_the_catalog(tmp_path: Path):
 
     assert findings["db"].preset == "postgres"
     assert findings["db"].tool == "postgres_mcp_modify"
-    assert findings["chat"].preset == "slack"
     assert findings["sh"].preset == "coding-agent"
     assert findings["sh"].snippet["args"][-2:] == ["bash", "server.sh"]
 
@@ -328,15 +326,12 @@ def test_extra_github_and_postgres_package_names_are_seen(tmp_path: Path):
     assert findings["db"].preset == "postgres"
 
 
-def test_browser_and_email_package_names_are_seen(tmp_path: Path):
+def test_browser_and_email_packages_are_not_in_the_default_catalog(tmp_path: Path):
     config = tmp_path / "mcp.json"
     _write(
         config,
         {
-            "web": {
-                "command": "npx",
-                "args": ["-y", "@playwright/mcp"],
-            },
+            "web": {"command": "npx", "args": ["-y", "@playwright/mcp"]},
             "mail": {
                 "command": "npx",
                 "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
@@ -344,12 +339,7 @@ def test_browser_and_email_package_names_are_seen(tmp_path: Path):
         },
     )
 
-    findings = {item.server: item for item in scan_config(config)}
-
-    assert findings["web"].preset == "browser"
-    assert findings["web"].tool == "browser_evaluate"
-    assert findings["mail"].preset == "email"
-    assert findings["mail"].tool == "send_email"
+    assert scan_config(config) == []
 
 
 def test_windsurf_cline_and_continue_configs_are_scanned(
@@ -377,9 +367,9 @@ def test_windsurf_cline_and_continue_configs_are_scanned(
             {
                 "mcpServers": [
                     {
-                        "name": "slack",
+                        "name": "docs",
                         "command": "npx",
-                        "args": ["-y", "@modelcontextprotocol/server-slack"],
+                        "args": ["-y", "@crystaldba/postgres-mcp"],
                     }
                 ]
             }
@@ -392,13 +382,13 @@ def test_windsurf_cline_and_continue_configs_are_scanned(
 
     assert ("windsurf", "github") in by_client
     assert ("cline", "db") in by_client
-    assert ("continue", "slack") in by_client
+    assert ("continue", "docs") in by_client
 
     applied = apply_wraps(None)
     assert len(applied) == 3
     cont = json.loads(continue_cfg.read_text(encoding="utf-8"))
     assert cont["mcpServers"][0]["command"] == "npx"
-    assert cont["mcpServers"][0]["name"] == "slack"
+    assert cont["mcpServers"][0]["name"] == "docs"
     assert cont["mcpServers"][0]["args"][1] == "harnis"
 
 

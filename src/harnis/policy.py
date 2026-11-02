@@ -68,6 +68,11 @@ _OBFUSCATION = re.compile(
     r"\[char\]|frombase64string|invoke-expression|\biex\b",
     re.IGNORECASE,
 )
+_ENCODED_FLAGS = frozenset({"-encodedcommand", "-enc", "-ec"})
+_BASE64_PIPE = re.compile(
+    r"base64\s+(-d|--decode)|frombase64string|\|\s*sh\b|\|\s*bash\b|\|\s*zsh\b",
+    re.IGNORECASE,
+)
 _SECRET_MARKERS = (
     b"-----BEGIN OPENSSH PRIVATE KEY-----",
     b"-----BEGIN PRIVATE KEY-----",
@@ -124,10 +129,18 @@ class Decision:
     phrase: str
 
     def line(self) -> str:
-        return (
-            f"🚨 BLOCKED: agent attempted to {self.phrase} "
-            f"(policy: {self.policy})"
-        )
+        body = f"🚨 BLOCKED: agent attempted to {self.phrase}"
+        if self.policy == "no-unbounded-shell":
+            body += " — shell has no script argument and can read stdin"
+        elif self.policy == "no-edit-thrash":
+            body += " — stop and rethink instead of rewriting the same bytes"
+        elif self.policy == "no-path-wander":
+            body += " — stay inside the files already opened this session"
+        elif self.policy == "no-tool-budget":
+            body += " — session tool-call budget exhausted"
+        elif self.policy == "deny-tool":
+            body += " — tool is listed in deny_tools"
+        return f"{body} (policy: {self.policy})"
 
 
 @dataclass(frozen=True)
@@ -137,6 +150,7 @@ class Rules:
     deny_path_parts: frozenset[str] = frozenset()
     deny_file_names: frozenset[str] = frozenset()
     allow_path_parts: frozenset[str] = frozenset()
+    deny_tools: frozenset[str] = frozenset()
     preset: str = "coding-agent"
     empty_edit_limit: int = 5
     max_tool_calls: int | None = None
@@ -181,6 +195,7 @@ def load_rules(path: str | None) -> Rules:
         deny_path_parts=_string_set(data.get("deny_path_parts", []), "deny_path_parts"),
         deny_file_names=_string_set(data.get("deny_file_names", []), "deny_file_names"),
         allow_path_parts=_string_set(data.get("allow_path_parts", []), "allow_path_parts"),
+        deny_tools=_tool_name_set(data.get("deny_tools", []), "deny_tools"),
         empty_edit_limit=_optional_positive_int(
             data.get("empty_edit_limit", 5), "empty_edit_limit", default=5
         ),
@@ -220,6 +235,7 @@ def rules_for(preset: str, path: str | None = None) -> Rules:
         deny_path_parts=loaded.deny_path_parts,
         deny_file_names=loaded.deny_file_names,
         allow_path_parts=loaded.allow_path_parts,
+        deny_tools=loaded.deny_tools,
         preset=preset,
         empty_edit_limit=loaded.empty_edit_limit,
         max_tool_calls=loaded.max_tool_calls,
@@ -231,6 +247,16 @@ def _string_set(value, field: str) -> frozenset[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{field} must be a list of strings")
     return frozenset(item.casefold() for item in value if item)
+
+
+def _tool_name_set(value, field: str) -> frozenset[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be a list of strings")
+    return frozenset(_normalize_tool_name(item) for item in value if item)
+
+
+def _normalize_tool_name(name: str) -> str:
+    return name.strip().lower().replace("-", "_")
 
 
 def _optional_positive_int(value, field: str, default: int | None) -> int | None:
@@ -291,7 +317,17 @@ def _judge_path(action: Action, rules: Rules) -> Decision:
 
 
 def credential_path(path: str, rules: Rules | None = None) -> bool:
+    """True if the path string or its resolved target looks like a credential."""
     rules = rules or Rules()
+    if _credential_path_string(path, rules):
+        return True
+    resolved = _resolve_path(path)
+    if resolved and resolved.casefold() != str(path).replace("\\", "/").casefold():
+        return _credential_path_string(resolved, rules)
+    return False
+
+
+def _credential_path_string(path: str, rules: Rules) -> bool:
     parts = _parts(path)
     if not parts:
         return False
@@ -309,6 +345,19 @@ def credential_path(path: str, rules: Rules | None = None) -> bool:
     if name == ".env" or name.startswith(".env."):
         return True
     return False
+
+
+def _resolve_path(path: str) -> str | None:
+    """Best-effort realpath. Missing targets still normalize when possible."""
+    from pathlib import Path
+
+    text = str(path).strip()
+    if not text:
+        return None
+    try:
+        return str(Path(text).expanduser().resolve()).replace("\\", "/")
+    except (OSError, RuntimeError, ValueError):
+        return None
 
 
 def display_path(path: str) -> str:
@@ -350,21 +399,58 @@ def _judge_exec(action: Action, rules: Rules) -> Decision:
 
 
 def command_mentions_credential(command: tuple[str, ...], rules: Rules | None = None) -> bool:
+    """True only for argv pieces that look like paths, not bare search tokens."""
     rules = rules or Rules()
+    for part in command:
+        text = part.replace("\\", "/")
+        if not _looks_like_path(text):
+            continue
+        if credential_path(text, rules):
+            return True
     blob = " ".join(command).replace("\\", "/")
-    if credential_path(blob, rules):
+    if _looks_like_path(blob) and credential_path(blob, rules):
         return True
-    return any(credential_path(part.replace("\\", "/"), rules) for part in command)
+    if command and _basename(command[0]) in _SHELLS:
+        script = _shell_script(command[1:])
+        if script and _script_mentions_credential(script, rules):
+            return True
+    return False
+
+
+def _script_mentions_credential(script: str, rules: Rules) -> bool:
+    try:
+        tokens = shlex.split(script, posix=True)
+    except ValueError:
+        tokens = script.split()
+    for token in tokens:
+        text = token.replace("\\", "/")
+        if _looks_like_path(text) and credential_path(text, rules):
+            return True
+    return False
+
+
+def _looks_like_path(text: str) -> bool:
+    if not text or "://" in text:
+        return False
+    if text.startswith("~") or text.startswith("/") or text.startswith("./") or text.startswith("../"):
+        return True
+    if len(text) >= 3 and text[1] == ":" and text[2] == "/":
+        return True
+    return "/" in text
 
 
 def opaque_shell(command: tuple[str, ...]) -> bool:
     """A shell script that hides the path is not a fixed command."""
     if not command or _basename(command[0]) not in _SHELLS:
         return False
+    if any(arg.casefold() in _ENCODED_FLAGS for arg in command[1:]):
+        return True
     script = _shell_script(command[1:])
     if not script:
         return False
     if _OBFUSCATION.search(script):
+        return True
+    if _BASE64_PIPE.search(script):
         return True
     if _EXPANSION.search(script) is None:
         return False
@@ -397,8 +483,27 @@ def _bounded_script(exe: str, args: tuple[str, ...]) -> bool:
     if exe in {"cmd", "cmd.exe"}:
         return _flag_has_argument(args, {"/c", "-c"})
     if exe in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
-        return _flag_has_argument(args, {"-command", "-c"})
-    return _flag_has_argument(args, {"-c"}) or _cluster_has_argument(args)
+        return _flag_has_argument(args, {"-command", "-c"} | _ENCODED_FLAGS)
+    if _flag_has_argument(args, {"-c"}) or _cluster_has_argument(args):
+        return True
+    return _posix_shell_script_path(args)
+
+
+def _posix_shell_script_path(args: tuple[str, ...]) -> bool:
+    """bash deploy.sh is bounded; bare bash / bash -i are not."""
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            return index + 1 < len(args) and bool(args[index + 1].strip())
+        if arg.startswith("-") and not arg.startswith("--"):
+            index += 1
+            continue
+        if arg.startswith("--"):
+            index += 1
+            continue
+        return bool(arg.strip())
+    return False
 
 
 def _flag_has_argument(args: tuple[str, ...], flags: set[str]) -> bool:
@@ -460,11 +565,16 @@ def _recursive_and_force(args: tuple[str, ...]) -> bool:
 def _shell_script(args: tuple[str, ...]) -> str:
     """Return the command string from `sh -c`, `cmd /c`, or similar."""
     tokens = list(args)
-    while tokens and tokens[0] in {"-c", "/c", "-Command", "-command"}:
-        tokens = tokens[1:]
+    while tokens:
+        head = tokens[0]
+        folded = head.casefold()
+        if folded in {"-c", "/c", "-command"} | _ENCODED_FLAGS:
+            tokens = tokens[1:]
+            break
+        if folded in {"-lc", "-cl"}:
+            tokens = tokens[1:]
+            break
         break
-    if tokens and tokens[0] in {"-lc", "-cl"}:
-        tokens = tokens[1:]
     return " ".join(tokens)
 
 
@@ -582,11 +692,81 @@ _FILE_WRITES = frozenset({
 def judge_tool_call(name: str, arguments: dict, rules: Rules | None = None) -> Decision:
     """Map an agent tool call onto the same rules as a syscall."""
     rules = rules or Rules()
-    normalized = name.strip().lower().replace("-", "_")
+    normalized = _normalize_tool_name(name)
+    if normalized in rules.deny_tools:
+        return Decision(False, "deny-tool", f"call {name}")
     decision = _dispatch_tool(name, normalized, arguments, rules)
     if not decision.allowed:
         return decision
+    leaked = _arguments_leak(arguments, rules)
+    if leaked is not None:
+        return leaked
     return _server_preset(normalized, arguments, rules) or decision
+
+
+def judge_resource_read(uri: str, rules: Rules | None = None) -> Decision:
+    """Judge an MCP resources/read URI the same way as a file read when path-like."""
+    rules = rules or Rules()
+    path = _uri_to_path(uri)
+    if path is None:
+        return Decision(True, None, f"read resource {uri or '(empty)'}")
+    return judge(Action(kind="file_read", path=path), rules)
+
+
+def _uri_to_path(uri: str) -> str | None:
+    text = str(uri or "").strip()
+    if not text:
+        return None
+    if text.casefold().startswith("file:"):
+        from urllib.parse import unquote, urlparse
+
+        parsed = urlparse(text)
+        path = unquote(parsed.path or "")
+        if parsed.netloc and parsed.netloc not in {"localhost", "127.0.0.1"}:
+            # file://hostname/path — keep host in the path string for heuristics
+            path = f"/{parsed.netloc}{path}"
+        if os.name == "nt" and len(path) >= 3 and path[0] == "/" and path[2] == ":":
+            path = path[1:]
+        return path.replace("\\", "/") or None
+    if _looks_like_path(text.replace("\\", "/")):
+        return text
+    return None
+
+
+def _arguments_leak(arguments: dict, rules: Rules) -> Decision | None:
+    """Catch renamed tools that still pass credential paths or secret-shaped text."""
+    if not isinstance(arguments, dict):
+        return None
+    strings: list[str] = []
+    _collect_strings(arguments, strings)
+    for text in strings:
+        collapsed = text.replace("\\", "/")
+        if _looks_like_path(collapsed) and credential_path(collapsed, rules):
+            return Decision(
+                False,
+                "no-credential-access",
+                f"read {display_path(collapsed)}",
+            )
+    for text in strings:
+        if carries_secret(text.encode("utf-8", "surrogateescape"), ()):
+            return Decision(False, "no-secret-exfil", "send secrets in tool arguments")
+    return None
+
+
+def _collect_strings(value, out: list[str], depth: int = 0) -> None:
+    if depth > 6:
+        return
+    if isinstance(value, str):
+        if value:
+            out.append(value)
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _collect_strings(item, out, depth + 1)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_strings(item, out, depth + 1)
 
 
 def _dispatch_tool(name: str, normalized: str, arguments: dict, rules: Rules) -> Decision:
@@ -770,7 +950,19 @@ def _judge_paths(kind: str, arguments: dict, rules: Rules | None) -> Decision:
 
 def _argument_paths(arguments: dict) -> list[str]:
     found: list[str] = []
-    for key in ("path", "file_path"):
+    for key in (
+        "path",
+        "file_path",
+        "file",
+        "uri",
+        "target",
+        "directory",
+        "source",
+        "destination",
+        "dest",
+        "filename",
+        "key_path",
+    ):
         value = arguments.get(key)
         if value not in (None, ""):
             found.append(str(value))

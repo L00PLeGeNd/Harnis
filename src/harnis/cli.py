@@ -26,7 +26,7 @@ init     Write .harnis/policy.json and wrap local MCP servers (optional editor h
 status   Show policy, wraps, and optional hooks posture.
 scan     Read mcp.json. Name the dangerous tool and print a wrap, or --apply it.
 demo     Print one BLOCKED line for a GitHub delete_file. Nothing is executed.
-mcp      Judge tools/call, then forward the rest to an MCP stdio server.
+mcp      Judge tools/call and resources/read, then forward the rest.
 protect  Deny credential reads, rm -rf, and outbound secrets at runtime.
 probe    Judge tool calls the MCP proxy would refuse. A transcript is not executed.
 hook     Editor hook adapter: stdin JSON event → permission JSON.
@@ -37,9 +37,9 @@ Options:
   --hooks             init: install editor hooks under .cursor/hooks.json
   --no-hooks          init: never install hooks
   --json              Print scan findings as JSON
-  --preset NAME       coding-agent (default), readonly, ci, github, postgres, slack, browser, or email
+  --preset NAME       coding-agent (default), github, readonly, ci (extras: postgres, slack, browser, email)
   --report PATH       HTML report
-  --policy PATH       JSON: deny/allow paths, empty_edit_limit, max_tool_calls, max_unique_paths
+  --policy PATH       JSON: deny/allow paths, deny_tools, budgets
   --url URL           Probe an HTTP agent instead of a local script
   --transcript PATH   Judge a recorded MCP JSONL session. Nothing is executed
   --scenario LIST     Comma list: credential,destructive,rag,escalation,exfil,all

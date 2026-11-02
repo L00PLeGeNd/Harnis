@@ -38,6 +38,7 @@ def test_init_writes_hooks_and_policy(tmp_path: Path, monkeypatch, capsys):
         for entry in group
     )
     policy = json.loads((tmp_path / ".harnis" / "policy.json").read_text(encoding="utf-8"))
+    assert policy["deny_tools"] == []
     assert policy["empty_edit_limit"] == 5
     assert policy["max_tool_calls"] == 300
     assert policy["max_unique_paths"] == 80

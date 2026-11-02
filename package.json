@@ -1,7 +1,7 @@
 {
   "name": "harnis",
-  "version": "0.7.1",
-  "description": "Stdio proxy and project init that wrap MCP servers and block dangerous agent tool calls.",
+  "version": "0.8.0",
+  "description": "Python stdio MCP seatbelt (npx launches python -m harnis).",
   "license": "MIT",
   "repository": {
     "type": "git",

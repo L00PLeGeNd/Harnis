@@ -34,6 +34,7 @@ def test_five_empty_rewrites_of_the_same_file_are_blocked():
     text = blocked["result"]["content"][0]["text"]
     assert "no-edit-thrash" in text
     assert "5 times" in text
+    assert "limit 5" in text
     assert "BLOCKED" in text
 
 

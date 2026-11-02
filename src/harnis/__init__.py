@@ -6,6 +6,7 @@ from harnis.policy import (
     Rules,
     discover_policy,
     judge,
+    judge_resource_read,
     judge_tool_call,
     load_rules,
     resolve_policy_path,
@@ -13,7 +14,7 @@ from harnis.policy import (
 )
 from harnis.probe import Finding, HttpAgent, ProbeTarget, Turn, probe, scenario_pack
 
-__version__ = "0.7.1"
+__version__ = "0.8.0"
 
 __all__ = [
     "Action",
@@ -25,6 +26,7 @@ __all__ = [
     "Turn",
     "discover_policy",
     "judge",
+    "judge_resource_read",
     "judge_tool_call",
     "load_rules",
     "probe",

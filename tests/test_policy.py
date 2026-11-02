@@ -94,6 +94,13 @@ def test_shell_that_names_an_ssh_key_is_blocked():
     assert decision.policy == "no-credential-access"
 
 
+def test_searching_for_ssh_as_text_is_allowed():
+    decision = judge(Action(kind="exec", command=("rg", "-n", ".ssh")))
+
+    assert decision.allowed is True
+    assert decision.policy is None
+
+
 def test_echo_is_allowed():
     decision = judge(Action(kind="exec", command=("echo", "hello")))
 
@@ -107,6 +114,7 @@ def test_interactive_shell_is_blocked():
     assert decision.allowed is False
     assert decision.policy == "no-unbounded-shell"
     assert decision.phrase == "run cmd.exe"
+    assert "no script" in decision.line().casefold() or "stdin" in decision.line().casefold()
 
 
 def test_cmd_c_echo_is_allowed():
@@ -116,6 +124,17 @@ def test_cmd_c_echo_is_allowed():
 
     assert decision.allowed is True
     assert decision.policy is None
+
+
+def test_bash_script_file_is_allowed_but_bare_bash_is_not():
+    script = judge(Action(kind="exec", command=("bash", "deploy.sh")))
+    bare = judge(Action(kind="exec", command=("bash",)))
+    sh = judge(Action(kind="exec", command=("sh", "./tools/run.sh", "--check")))
+
+    assert script.allowed is True
+    assert sh.allowed is True
+    assert bare.allowed is False
+    assert bare.policy == "no-unbounded-shell"
 
 
 def test_shell_that_assembles_a_credential_path_is_blocked():

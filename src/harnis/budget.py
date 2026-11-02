@@ -57,7 +57,7 @@ class EditBudget:
             return Decision(
                 False,
                 "no-tool-budget",
-                f"exceed the tool-call budget ({self.max_tool_calls})",
+                f"exceed the tool-call budget ({self._calls}/{self.max_tool_calls})",
             )
         path_hit = _path_target(name, arguments)
         if path_hit is not None:
@@ -70,7 +70,7 @@ class EditBudget:
                     return Decision(
                         False,
                         "no-path-wander",
-                        f"touch more than {self.max_unique_paths} distinct paths",
+                        f"open a new path after {self.max_unique_paths} distinct paths",
                     )
                 self._paths.add(key)
         path, content = _write_target(name, arguments)
@@ -89,7 +89,7 @@ class EditBudget:
         return Decision(
             False,
             "no-edit-thrash",
-            f"thrash {path} {count} times with no substantive change",
+            f"thrash {path} {count} times with no substantive change (limit {self.empty_edit_limit})",
         )
 
     def to_dict(self) -> dict:
