@@ -1,52 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 260" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="300" viewBox="0 0 880 300" role="img" aria-labelledby="title desc">
   <title id="title">Harnis seatbelt</title>
-  <desc id="desc">Client speaks stdio JSON-RPC to harnis mcp, which judges tools/call and path-like resources/read before forwarding to the MCP server.</desc>
-  <rect width="860" height="260" fill="#f4efe6"/>
+  <desc id="desc">Client to harnis mcp to MCP server over stdio. Denials return to the client and never reach the child process.</desc>
+  <rect width="880" height="300" fill="#f4efe6"/>
 
-  <g stroke="#1c1612" stroke-opacity="0.07" stroke-width="1" fill="none">
-    <path d="M30 30 H830 M30 70 H830 M30 110 H830 M30 150 H830 M30 190 H830 M30 230 H830"/>
-    <path d="M30 30 V230 M70 30 V230 M110 30 V230 M150 30 V230 M190 30 V230 M230 30 V230 M270 30 V230 M310 30 V230 M350 30 V230 M390 30 V230 M430 30 V230 M470 30 V230 M510 30 V230 M550 30 V230 M590 30 V230 M630 30 V230 M670 30 V230 M710 30 V230 M750 30 V230 M790 30 V230 M830 30 V230"/>
+  <!-- paper grid -->
+  <g stroke="#1c1612" stroke-opacity="0.06" stroke-width="1" fill="none">
+    <path d="M40 40 H840 M40 80 H840 M40 120 H840 M40 160 H840 M40 200 H840 M40 240 H840 M40 280 H840"/>
+    <path d="M40 40 V280 M80 40 V280 M120 40 V280 M160 40 V280 M200 40 V280 M240 40 V280 M280 40 V280 M320 40 V280 M360 40 V280 M400 40 V280 M440 40 V280 M480 40 V280 M520 40 V280 M560 40 V280 M600 40 V280 M640 40 V280 M680 40 V280 M720 40 V280 M760 40 V280 M800 40 V280 M840 40 V280"/>
   </g>
 
-  <defs>
-    <marker id="arr" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-      <path d="M0 0 L7 3.5 L0 7 Z" fill="#1c1612"/>
-    </marker>
-  </defs>
-
-  <g fill="none" stroke="#1c1612" stroke-width="1.35">
-    <rect x="40" y="88" width="120" height="56"/>
-    <rect x="260" y="72" width="200" height="88"/>
-    <rect x="580" y="88" width="150" height="56"/>
-
-    <path d="M290 116 H430"/>
-    <path d="M360 108 V124"/>
-
-    <path d="M160 116 H260" marker-end="url(#arr)"/>
-    <path d="M460 116 H580" marker-end="url(#arr)"/>
-
-    <path d="M360 160 V196 H220" marker-end="url(#arr)"/>
-    <rect x="40" y="178" width="180" height="44"/>
+  <!-- boxes -->
+  <g fill="#f4efe6" stroke="#1c1612" stroke-width="1.5">
+    <rect x="56" y="100" width="140" height="60"/>
+    <rect x="320" y="88" width="240" height="84"/>
+    <rect x="680" y="100" width="150" height="60"/>
+    <rect x="320" y="230" width="240" height="44" stroke="#9d1c1c"/>
   </g>
 
-  <g font-family="Consolas, Monaco, monospace" fill="#1c1612">
-    <text x="48" y="28" font-size="11" letter-spacing="1.6">HARNIS / STDIO SEATBELT</text>
-    <text x="100" y="122" font-size="13" text-anchor="middle">client</text>
-    <text x="360" y="108" font-size="13" text-anchor="middle">harnis mcp</text>
-    <text x="360" y="142" font-size="10" text-anchor="middle" fill="#6d6256">judge then forward</text>
-    <text x="655" y="122" font-size="13" text-anchor="middle">MCP server</text>
-    <text x="130" y="204" font-size="12" text-anchor="middle">deny to client only</text>
-
-    <text x="210" y="78" font-size="10" fill="#6d6256">stdio JSON-RPC</text>
-    <text x="500" y="78" font-size="10" fill="#6d6256">stdio (allowed)</text>
-    <text x="280" y="214" font-size="10" fill="#9d1c1c">blocked - never reaches child</text>
+  <!-- wires + solid arrowheads (no markers: GitHub-safe) -->
+  <g stroke="#1c1612" stroke-width="1.5" fill="#1c1612">
+    <!-- client -> harnis -->
+    <path d="M196 130 H312" fill="none"/>
+    <path d="M312 130 l-10 -5 v10 z"/>
+    <!-- harnis -> server -->
+    <path d="M560 130 H672" fill="none"/>
+    <path d="M672 130 l-10 -5 v10 z"/>
+    <!-- harnis -> deny -->
+    <path d="M440 172 V222" fill="none" stroke="#9d1c1c"/>
+    <path d="M440 222 l-5 -10 h10 z" fill="#9d1c1c"/>
   </g>
 
+  <!-- corner ticks -->
   <g stroke="#1c1612" stroke-width="1" fill="none">
-    <path d="M40 88 h7 M40 88 v7"/>
-    <path d="M160 88 h-7 M160 88 v7"/>
-    <path d="M40 144 h7 M40 144 v-7"/>
-    <path d="M160 144 h-7 M160 144 v-7"/>
+    <path d="M56 100 h9 M56 100 v9"/>
+    <path d="M196 100 h-9 M196 100 v9"/>
+    <path d="M56 160 h9 M56 160 v-9"/>
+    <path d="M196 160 h-9 M196 160 v-9"/>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace" fill="#1c1612">
+    <text x="56" y="36" font-size="12">HARNIS / STDIO SEATBELT</text>
+
+    <text x="126" y="135" font-size="15" text-anchor="middle">client</text>
+
+    <text x="440" y="124" font-size="15" text-anchor="middle">harnis mcp</text>
+    <text x="440" y="146" font-size="11" text-anchor="middle" fill="#6d6256">judge, then forward</text>
+
+    <text x="755" y="135" font-size="15" text-anchor="middle">MCP server</text>
+
+    <text x="440" y="257" font-size="14" text-anchor="middle" fill="#9d1c1c">deny to client only</text>
+
+    <text x="254" y="118" font-size="11" text-anchor="middle" fill="#6d6256">stdio</text>
+    <text x="616" y="118" font-size="11" text-anchor="middle" fill="#6d6256">allowed</text>
+    <text x="456" y="206" font-size="11" fill="#9d1c1c">blocked</text>
   </g>
 </svg>
