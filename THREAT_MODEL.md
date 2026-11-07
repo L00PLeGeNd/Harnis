@@ -14,12 +14,14 @@ npx -y harnis mcp --preset github -- <server>
 
 ## In scope (what we try to stop)
 
-- **Dangerous MCP tools** on wrapped stdio servers — name/args heuristics + presets + optional `deny_tools`. Limit: intent without matching name/args still slips.
-- **Credential path strings** on any `tools/call` args — deep string walk + path denylist + best-effort `Path.resolve()`. Limit: broken/uncreated links; TOCTOU; Windows privilege for some symlinks.
-- **`resources/read`** of `file:` / path-like URIs — same path rules as file tools. Limit: non-file schemes; opaque custom URI templates.
-- **Obvious destructive / opaque shell** — `rm -rf`, EncodedCommand, base64→shell, expansion+reader. Limit: novel encodings, other languages.
-- **Session thrash / wander / call caps** — in-proxy counters. Limit: per process (or hook state file); not cross-host.
-- **Secret-shaped bodies / tool text** — marker scan (PEM, AKIA…, ghp_…). Limit: easy to fragment or encrypt.
+| Control | Mechanism | Limit |
+| --- | --- | --- |
+| Dangerous MCP tools on wrapped stdio servers | Name/args heuristics + presets + optional `deny_tools` | Intent without matching name/args still slips |
+| Credential path strings on **any** `tools/call` args | Deep string walk + path denylist + best-effort `Path.resolve()` | Broken/uncreated links; TOCTOU; Windows privilege for some symlinks |
+| `resources/read` of `file:` / path-like URIs | Same path rules as file tools | Non-file schemes; opaque custom URI templates |
+| Obvious destructive / opaque shell | `rm -rf`, EncodedCommand, base64→shell, expansion+reader | Novel encodings, other languages |
+| Session thrash / wander / call caps | In-proxy counters | Per process (or hook state file); not cross-host |
+| Secret-shaped bodies / tool text | Marker scan (PEM, AKIA…, ghp_…) | Easy to fragment or encrypt |
 
 ## Out of scope (do not market as covered)
 
@@ -40,15 +42,17 @@ Anything that never enters this process is unconstrained.
 
 ## Bypass matrix (known)
 
-- **Remote `url` MCP** — not wrapped
-- **Symlink to `~/.ssh` named `/work/data`** — blocked when resolve succeeds; allowed if link missing/unresolvable
-- **Junction/reparse tricks `resolve()` misses** — may still bypass
-- **Tool renamed** (`delete_file` → `remove_repo_file`) with no secret args — GitHub preset miss unless `deny_tools` lists it
-- **Renamed tool that still passes `~/.ssh/...`** — blocked (universal arg sweep)
-- **Client talks to server without Harnis** — no enforcement
-- **Hook-less editor local Write** — no MCP proxy involvement
-- **Fragmented / encoded secret exfil** — may miss `no-secret-exfil`
-- **`prompts/get` carrying a path** — not judged
+| Bypass | Result today |
+| --- | --- |
+| Remote `url` MCP | Not wrapped |
+| Symlink to `~/.ssh` named `/work/data` | Blocked when resolve succeeds; allowed if link missing/unresolvable |
+| Junction/reparse tricks resolve() misses | May still bypass |
+| Tool renamed (`delete_file` → `remove_repo_file`) with no secret args | GitHub preset miss unless `deny_tools` lists it |
+| Renamed tool that still passes `~/.ssh/...` | Blocked (universal arg sweep) |
+| Client talks to server without Harnis | No enforcement |
+| Hook-less editor local Write | No MCP proxy involvement |
+| Fragmented / encoded secret exfil | May miss `no-secret-exfil` |
+| `prompts/get` carrying a path | Not judged |
 
 Adversarial tests in `tests/test_adversarial.py` lock gaps as **documented**, not accidental greens. Control-plane coverage lives in `tests/test_control_plane.py`.
 

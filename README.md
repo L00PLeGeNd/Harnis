@@ -25,20 +25,24 @@ Read the [threat model](THREAT_MODEL.md) before treating this as a sandbox. URL 
 
 ## What it does
 
-- `harnis mcp` — stdio JSON-RPC proxy; blocks matched `tools/call` / `resources/read`
-- `harnis init` / `status` — project policy + wrap local MCP configs
-- `harnis scan [--apply]` — find bare catalog servers; optional in-place wrap
-- `harnis hook` — optional editor hook adapter (same policy)
-- `harnis protect` / `probe` — best-effort Python / transcript checks — see threat model
+| Piece | Role |
+| --- | --- |
+| `harnis mcp` | Stdio JSON-RPC proxy; blocks matched `tools/call` / `resources/read` |
+| `harnis init` / `status` | Project policy + wrap local MCP configs |
+| `harnis scan [--apply]` | Find bare catalog servers; optional in-place wrap |
+| `harnis hook` | Optional editor hook adapter (same policy) |
+| `harnis protect` / `probe` | Best-effort Python / transcript checks — see threat model |
 
 ![Harnis seatbelt: client → harnis mcp (judge) → MCP server; denies return to client only](docs/assets/seatbelt.svg)
 
 Primary presets:
 
-- `coding-agent` (default) — credential paths (any tool args), opaque/encoded shell, `rm -rf`, secret-shaped text
-- `github` — `delete_file` / `delete_repository`; writes to default branch
-- `readonly` — writes, shell, outbound sends
-- `ci` — every shell call
+| Preset | Denies (examples) |
+| --- | --- |
+| `coding-agent` (default) | Credential paths (any tool args), opaque/encoded shell, `rm -rf`, secret-shaped text |
+| `github` | `delete_file` / `delete_repository`; writes to default branch |
+| `readonly` | Writes, shell, outbound sends |
+| `ci` | Every shell call |
 
 Extra presets (`postgres`, `slack`, `browser`, `email`) remain in code for experiments; they are not the product.
 
