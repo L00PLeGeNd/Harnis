@@ -1,16 +1,25 @@
 # Harnis
 
-Local **stdio MCP seatbelt**: judge `tools/call` and path-like `resources/read` before the server sees them. A denial never reaches the child process.
+**A seatbelt for MCP — not a sandbox.**
+
+Harnis sits on stdio between the client and a server. It judges `tools/call` and path-like `resources/read` **before** the child sees them. A denial returns to the client; it never becomes a tool execution.
+
+Pair it with [Witnis](https://github.com/L00PLeGeNd/Witnis) in the **Trusted Agent Loop**: Witnis grounds the claim (impact · evidence · PR gate · gated verify); Harnis constrains which tools may run. Full threat model: [THREAT_MODEL.md](THREAT_MODEL.md).
 
 ```bash
+# Preferred: Witnis writes wrap + policy + index
+witnis loop-init
+
+# Or wrap any stdio MCP by hand
+npx -y harnis mcp --preset coding-agent --policy .harnis/policy.json -- witnis mcp
 npx -y harnis mcp --preset github -- github-mcp-server stdio
 ```
 
 ```text
-🚨 BLOCKED: agent attempted to delete a file on GitHub — … (policy: github-delete)
+BLOCKED: agent attempted to delete a file on GitHub — … (policy: github-delete)
 ```
 
-Thirty-second wrap of a config you already have:
+Already have an MCP config?
 
 ```bash
 npx -y harnis init
@@ -19,7 +28,7 @@ npx -y harnis status
 
 **Python 3.11+.** The npm package only spawns `python -m harnis`. This is not a Node security runtime.
 
-Read the [threat model](THREAT_MODEL.md) before treating this as a sandbox. URL MCP, unresolvable symlinks, renamed tools with no credential args, and anything that never passes through `harnis mcp` are out of scope.
+Out of scope until traffic passes through `harnis mcp`: URL MCP, unresolvable symlinks, renamed tools with no credential args, and anything that never hits the proxy. Read the [threat model](THREAT_MODEL.md) before treating this as a jail.
 
 ---
 

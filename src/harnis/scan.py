@@ -16,6 +16,8 @@ _PACKAGES: tuple[tuple[str, str, str], ...] = (
     ("@modelcontextprotocol/server-postgres", "postgres", "postgres_mcp_modify"),
     ("@crystaldba/postgres-mcp", "postgres", "postgres_mcp_modify"),
     ("postgres-mcp", "postgres", "postgres_mcp_modify"),
+    # Witnis: prefer coding-agent seatbelt; dangerous surface is authorize-gated verify
+    ("witnis", "coding-agent", "run_verification"),
 )
 _SHELLS = frozenset(
     name
