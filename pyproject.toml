@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "harnis"
 version = "0.8.2"
-description = "Stdio MCP seatbelt — not a sandbox. Judge tools/call before the server sees them."
+description = "Stdio MCP seatbelt included with Witnis (witnis-dev). Judge tools/call before the server sees them."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
